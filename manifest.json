@@ -1,0 +1,11 @@
+{
+  "name": "b/ui - Token Manager",
+  "id": "figma-token-replacer",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["https://api.github.com", "https://raw.githubusercontent.com"]
+  }
+}
