@@ -162,7 +162,10 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'get-dashboard-data') {
     try {
       const variables = await getFigmaVariables();
-      const githubConfig = await figma.clientStorage.getAsync('githubConfig');
+
+      // Per-file storage: each Figma file has its own GitHub config
+      const stored = figma.root.getPluginData('githubConfig');
+      const githubConfig = stored ? JSON.parse(stored) : null;
 
       figma.ui.postMessage({
         type: 'dashboard-data',
@@ -189,8 +192,9 @@ figma.ui.onmessage = async (msg) => {
 
   if (msg.type === 'save-github-config') {
     try {
-      await figma.clientStorage.setAsync('githubConfig', msg.config);
-      figma.notify('GitHub settings saved');
+      // Store per-file so each Figma file has its own GitHub connection
+      figma.root.setPluginData('githubConfig', JSON.stringify(msg.config));
+      figma.notify('GitHub settings saved for this file');
     } catch (error) {
       figma.ui.postMessage({
         type: 'error',

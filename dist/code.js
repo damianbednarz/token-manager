@@ -149,7 +149,8 @@
         if (msg.type === "get-dashboard-data") {
           try {
             const variables = yield getFigmaVariables();
-            const githubConfig = yield figma.clientStorage.getAsync("githubConfig");
+            const stored = figma.root.getPluginData("githubConfig");
+            const githubConfig = stored ? JSON.parse(stored) : null;
             figma.ui.postMessage({
               type: "dashboard-data",
               data: {
@@ -173,8 +174,8 @@
         }
         if (msg.type === "save-github-config") {
           try {
-            yield figma.clientStorage.setAsync("githubConfig", msg.config);
-            figma.notify("GitHub settings saved");
+            figma.root.setPluginData("githubConfig", JSON.stringify(msg.config));
+            figma.notify("GitHub settings saved for this file");
           } catch (error) {
             figma.ui.postMessage({
               type: "error",
