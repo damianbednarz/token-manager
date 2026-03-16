@@ -203,8 +203,23 @@
       background-color: #f8f8f8;
       border-color: #1E90FF;
     }
+    .action-button-disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .action-button-disabled:hover {
+      background-color: white;
+      border-color: #e0e0e0;
+    }
     .action-icon {
       font-size: 18px;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .spinning {
+      animation: spin 0.7s linear infinite;
     }
     .settings-icon {
       position: absolute;
@@ -226,24 +241,108 @@
       background-color: #f8f8f8;
       border-color: #1E90FF;
     }
-    .back-button {
-      display: inline-flex;
+    .collection-header {
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      background: #f8f9fa;
+      border: 1px solid #e8e8e8;
+      border-radius: 8px;
+      margin-bottom: 4px;
+      font-weight: 600;
+      font-size: 12px;
+      color: #0F1C2E;
+      cursor: default;
+      transition: all 0.2s;
+    }
+    .collection-header.drag-over {
+      border-color: #1E90FF;
+      background: #eef6ff;
+    }
+    .variable-row {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px 8px 24px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      margin-bottom: 2px;
+      font-size: 12px;
+      cursor: grab;
+      background: white;
+      transition: all 0.15s;
+      gap: 8px;
+    }
+    .variable-row:hover {
+      background: #f8f9fa;
+      border-color: #e8e8e8;
+    }
+    .variable-row.dragging {
+      opacity: 0.4;
+    }
+    .drag-handle {
+      color: #ccc;
+      font-size: 14px;
+      cursor: grab;
+      flex-shrink: 0;
+    }
+    .var-type-badge {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      letter-spacing: 0.3px;
+    }
+    .var-type-COLOR { background: #fce7f3; color: #be185d; }
+    .var-type-FLOAT { background: #dbeafe; color: #1d4ed8; }
+    .var-type-BOOLEAN { background: #dcfce7; color: #15803d; }
+    .var-type-STRING { background: #f3f4f6; color: #374151; }
+    .color-swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.1);
+      flex-shrink: 0;
+    }
+    .screen-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .back-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid #e8e8e8;
+      background: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      color: #0F1C2E;
+      flex-shrink: 0;
+      margin-top: 2px;
+      transition: all 0.2s;
+    }
+    .back-icon:hover {
+      background: #f8f8f8;
+      border-color: #1E90FF;
+    }
+    .screen-title {
+      margin: 0 0 2px 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #0F1C2E;
+      display: flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 12px;
-      font-size: 13px;
-      font-weight: 600;
-      background-color: white;
-      color: #0F1C2E;
-      border-radius: 6px;
-      cursor: pointer;
-      border: 1px solid #e8e8e8;
-      transition: all 0.2s;
-      margin-bottom: 16px;
     }
-    .back-button:hover {
-      background-color: #f8f8f8;
-      border-color: #1E90FF;
+    .screen-subtitle {
+      margin: 0;
+      font-size: 12px;
+      color: #999;
     }
     .input-field {
       width: 100%;
@@ -270,10 +369,13 @@
 <body>
   <div id="root">
     <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
-      <button class="back-button" onclick="showDashboard()">
-        <span>←</span>
-        <span>Back</span>
-      </button>
+      <div class="screen-header">
+        <div class="back-icon" onclick="showDashboard()">←</div>
+        <div>
+          <p class="screen-title">Import JSON</p>
+          <p class="screen-subtitle">Upload a token file to import</p>
+        </div>
+      </div>
 
       <div class="upload-container" id="dropzone" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0;">
         <div class="file-icon">📄</div>
@@ -309,12 +411,42 @@
       parent.postMessage({ pluginMessage: { type: 'get-dashboard-data' } }, '*');
     }
 
+    var _isRefreshing = false;
+
+    function refreshDashboard() {
+      const btn = document.getElementById('refresh-btn');
+      if (btn) btn.classList.add('spinning');
+      _isRefreshing = true;
+      parent.postMessage({ pluginMessage: { type: 'get-dashboard-data' } }, '*');
+    }
+
+    function showRefreshSuccess() {
+      const btn = document.getElementById('refresh-btn');
+      if (!btn) return;
+      btn.classList.remove('spinning');
+      btn.textContent = '✓';
+      btn.style.color = '#22c55e';
+      btn.style.fontWeight = '700';
+      setTimeout(function() {
+        btn.textContent = '↻';
+        btn.style.color = '';
+        btn.style.fontWeight = '';
+      }, 1500);
+    }
+
     function renderDashboard(data) {
       currentVariableCount = data.variableCount || 0;
 
       document.getElementById('root').innerHTML = `
         <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 12px 20px; position: relative;">
-          <div class="settings-icon" onclick="showGitHubSettings()">⚙️</div>
+          <div style="position: absolute; top: 20px; right: 20px; display: flex; gap: 8px;">
+            <div class="settings-icon" id="refresh-btn" onclick="refreshDashboard()" title="Refresh" style="position: static;">↻</div>
+            <div class="settings-icon" onclick="showGitHubSettings()" title="GitHub Settings" style="position: static;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
+              </svg>
+            </div>
+          </div>
 
           <div class="logo">b/</div>
 
@@ -341,17 +473,24 @@
             <span>Import JSON File</span>
           </button>
 
-          <button class="action-button" onclick="showGitHubSettings()">
-            <span class="action-icon">🔗</span>
-            <span>${data.githubConnected ? 'Manage GitHub Connection' : 'Connect to GitHub'}</span>
-          </button>
-
           ${currentVariableCount > 0 ? `
             <button class="action-button" onclick="exportTokens()">
               <span class="action-icon">📤</span>
               <span>Export Tokens as JSON</span>
             </button>
           ` : ''}
+
+          <button class="action-button ${!data.githubConnected ? 'action-button-disabled' : ''}" ${!data.githubConnected ? 'disabled' : 'onclick="showPushScreen()"'}>
+            <span class="action-icon">🚀</span>
+            <span>Push to GitHub</span>
+            ${!data.githubConnected ? '<span style="font-size: 10px; color: #bbb; margin-left: auto;">Configure GitHub first</span>' : ''}
+          </button>
+
+          <button class="action-button" onclick="showCollectionManager()">
+            <span class="action-icon">🗂️</span>
+            <span>Collection Manager</span>
+            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
+          </button>
         </div>
       `;
     }
@@ -365,10 +504,13 @@
 
       document.getElementById('root').innerHTML = `
         <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
-          <button class="back-button" onclick="showDashboard()">
-            <span>←</span>
-            <span>Back</span>
-          </button>
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">Import JSON</p>
+              <p class="screen-subtitle">Upload a token file to import</p>
+            </div>
+          </div>
 
           <div class="upload-container" id="dropzone" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0;">
             <div class="file-icon">📄</div>
@@ -426,16 +568,376 @@
       }
     }
 
+    function showPushScreen() {
+      const today = new Date();
+      const dateStr = today.getFullYear() + '-' +
+        String(today.getMonth() + 1).padStart(2, '0') + '-' +
+        String(today.getDate()).padStart(2, '0');
+      const defaultBranch = 'figma-tokens/' + dateStr;
+
+      document.getElementById('root').innerHTML = `
+        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">Push to GitHub</p>
+              <p class="screen-subtitle">Export current Figma Variables and open a Pull Request</p>
+            </div>
+          </div>
+
+          <div style="flex: 1; overflow-y: auto; min-height: 0;">
+            <label class="input-label">Branch Name</label>
+            <input type="text" class="input-field" id="push-branch" value="${defaultBranch}" />
+
+            <label class="input-label">PR Title</label>
+            <input type="text" class="input-field" id="push-pr-title" placeholder="Update design tokens from Figma" />
+
+            <label class="input-label">PR Description <span style="color:#bbb; font-weight:400;">(optional)</span></label>
+            <textarea class="input-field" id="push-pr-body" rows="3" placeholder="Describe what changed..." style="resize: none; height: 72px;"></textarea>
+
+            <div style="background: #f0f7ff; border-radius: 8px; padding: 12px; font-size: 11px; color: #555; line-height: 1.5; margin-top: 4px;">
+              Will push to <strong>${githubConfig.owner}/${githubConfig.repo}</strong> and open a PR into <strong>${githubConfig.branch}</strong>
+            </div>
+          </div>
+
+          <div style="padding: 16px 0 12px 0;">
+            <button class="button-primary" id="push-btn" onclick="initiatePush()">Create Pull Request</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function initiatePush() {
+      const branch = document.getElementById('push-branch').value.trim();
+      const prTitle = document.getElementById('push-pr-title').value.trim();
+      const prBody = document.getElementById('push-pr-body').value.trim();
+
+      if (!branch) { alert('Please enter a branch name.'); return; }
+      if (!prTitle) { alert('Please enter a PR title.'); return; }
+
+      const btn = document.getElementById('push-btn');
+      btn.textContent = 'Pushing...';
+      btn.disabled = true;
+
+      // Store PR details globally, then request token JSON from backend
+      window._pushData = { branch, prTitle, prBody };
+      parent.postMessage({ pluginMessage: { type: 'get-tokens-for-push' } }, '*');
+    }
+
+    async function pushToGitHub(jsonString) {
+      const { branch: newBranch, prTitle, prBody } = window._pushData;
+      const { token, owner, repo, branch: baseBranch, path } = githubConfig;
+      const headers = {
+        'Authorization': 'token ' + token,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      };
+
+      try {
+        // Step 1: Get base branch SHA
+        const refRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${baseBranch}`, { headers });
+        if (!refRes.ok) throw new Error('Could not get base branch: ' + refRes.statusText);
+        const refData = await refRes.json();
+        const commitSha = refData.object.sha;
+
+        // Step 2: Create new branch
+        const branchRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/refs`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ref: 'refs/heads/' + newBranch, sha: commitSha })
+        });
+        if (!branchRes.ok) {
+          const err = await branchRes.json();
+          throw new Error('Could not create branch: ' + (err.message || branchRes.statusText));
+        }
+
+        // Step 3: Get existing file SHA (if file already exists, needed to update it)
+        let existingFileSha = null;
+        const fileRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${newBranch}`, { headers });
+        if (fileRes.ok) {
+          const fileData = await fileRes.json();
+          existingFileSha = fileData.sha;
+        }
+
+        // Step 4: Commit token file to new branch
+        const contentBody = {
+          message: 'chore: update design tokens from Figma',
+          content: btoa(unescape(encodeURIComponent(jsonString))),
+          branch: newBranch
+        };
+        if (existingFileSha) contentBody.sha = existingFileSha;
+
+        const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(contentBody)
+        });
+        if (!commitRes.ok) {
+          const err = await commitRes.json();
+          throw new Error('Could not commit file: ' + (err.message || commitRes.statusText));
+        }
+
+        // Step 5: Create Pull Request
+        const prRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ title: prTitle, body: prBody, head: newBranch, base: baseBranch })
+        });
+        if (!prRes.ok) {
+          const err = await prRes.json();
+          throw new Error('Could not create PR: ' + (err.message || prRes.statusText));
+        }
+        const prData = await prRes.json();
+
+        showPushSuccess(prData.html_url, newBranch);
+      } catch (error) {
+        alert('Push failed: ' + error.message);
+        // Re-enable button so user can retry
+        const btn = document.getElementById('push-btn');
+        if (btn) { btn.textContent = 'Create Pull Request'; btn.disabled = false; }
+      }
+    }
+
+    function showPushSuccess(prUrl, branchName) {
+      document.getElementById('root').innerHTML = `
+        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px; align-items: center; justify-content: center; text-align: center;">
+          <div style="font-size: 48px; margin-bottom: 16px;">🎉</div>
+          <h2 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 700; color: #0F1C2E;">Pull Request Created!</h2>
+          <p style="margin: 0 0 8px 0; font-size: 12px; color: #666;">Branch <strong>${branchName}</strong> was pushed and a PR was opened.</p>
+          <p style="margin: 0 0 24px 0; font-size: 12px; color: #999;">Review and merge it on GitHub.</p>
+          <button class="button-primary" style="margin-bottom: 12px;" onclick="window.open('${prUrl}', '_blank')">Open Pull Request ↗</button>
+          <button class="button-secondary" onclick="showDashboard()">Back to Dashboard</button>
+        </div>
+      `;
+    }
+
+    var _allCollections = [];
+
+    function showCollectionManager() {
+      document.getElementById('root').innerHTML = `
+        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px; position: relative;">
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">Collection Manager <span style="background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; vertical-align: middle;">BETA</span></p>
+              <p class="screen-subtitle">Select or drag variables to move between collections</p>
+            </div>
+          </div>
+
+          <div id="collections-list" style="flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 80px;">
+            <div style="text-align: center; padding: 40px; color: #999; font-size: 12px;">Loading collections...</div>
+          </div>
+
+          <!-- Sticky action bar, shown when items are selected -->
+          <div id="selection-bar" style="display: none; position: absolute; bottom: 0; left: 0; right: 0; background: #0F1C2E; color: white; padding: 12px 20px; align-items: center; gap: 10px; z-index: 10;">
+            <span id="selection-count" style="font-size: 12px; font-weight: 600; flex-shrink: 0;"></span>
+            <select id="target-collection-select" style="flex: 1; padding: 6px 8px; border-radius: 6px; border: none; font-size: 12px; background: rgba(255,255,255,0.15); color: white; outline: none; min-width: 0;">
+              <option value="" style="color: #0F1C2E;">Move to collection...</option>
+            </select>
+            <button onclick="moveSelected()" style="background: #1E90FF; color: white; border: none; border-radius: 6px; padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; flex-shrink: 0;">Move</button>
+            <button onclick="clearSelection()" style="background: transparent; color: rgba(255,255,255,0.6); border: none; font-size: 18px; cursor: pointer; padding: 0 4px; flex-shrink: 0; line-height: 1;">×</button>
+          </div>
+        </div>
+      `;
+      parent.postMessage({ pluginMessage: { type: 'get-collections' } }, '*');
+    }
+
+    function renderCollections(collections) {
+      _allCollections = collections;
+      const list = document.getElementById('collections-list');
+      if (!list) return;
+
+      if (!collections || collections.length === 0) {
+        list.innerHTML = '<div style="text-align: center; padding: 40px; color: #999; font-size: 12px;">No collections found</div>';
+        return;
+      }
+
+      list.innerHTML = collections.map(function(col) {
+        const vars = col.variables.map(function(v) {
+          const isColor = v.type === 'COLOR';
+          const swatch = isColor ? '<div class="color-swatch" style="background:' + v.value + ';"></div>' : '';
+          const displayVal = isColor ? v.value : String(v.value);
+          return `
+            <div class="variable-row" draggable="true"
+              data-variable-id="${v.id}"
+              data-source-collection="${col.id}"
+            >
+              <input type="checkbox" class="var-checkbox" data-variable-id="${v.id}" data-source-collection="${col.id}"
+                style="flex-shrink: 0; cursor: pointer; width: 14px; height: 14px; accent-color: #1E90FF;"
+                onclick="handleCheckboxChange(event)" />
+              <span class="drag-handle" style="cursor: grab;">⠿</span>
+              <span class="var-type-badge var-type-${v.type}">${v.type === 'FLOAT' ? 'NUM' : v.type.slice(0,3)}</span>
+              ${swatch}
+              <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #0F1C2E;">${v.name}</span>
+              <span style="color: #999; font-size: 11px; flex-shrink: 0;">${displayVal}</span>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div class="collection-block" style="margin-bottom: 12px;">
+            <div class="collection-header"
+              data-collection-id="${col.id}"
+              ondragover="handleColDragOver(event, this)"
+              ondragleave="handleColDragLeave(this)"
+              ondrop="handleColDrop(event, '${col.id}', this)"
+            >
+              <input type="checkbox" class="col-select-all" data-collection-id="${col.id}"
+                style="margin-right: 8px; cursor: pointer; width: 13px; height: 13px; accent-color: #1E90FF;"
+                onclick="handleSelectAll(event, '${col.id}')" />
+              <span style="margin-right: 8px;">📁</span>
+              <span>${col.name}</span>
+              <span class="col-count" style="margin-left: auto; color: #999; font-weight: 400;">${col.variables.length} var${col.variables.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div class="variables-container" data-collection-id="${col.id}">${vars}</div>
+          </div>
+        `;
+      }).join('');
+
+      // Attach drag events
+      list.querySelectorAll('.variable-row').forEach(function(row) {
+        row.addEventListener('dragstart', function(e) {
+          // If dragging a checked item, drag all checked; otherwise just this one
+          const checked = getCheckedIds();
+          const thisId = row.dataset.variableId;
+          if (checked.length > 0 && checked.includes(thisId)) {
+            e.dataTransfer.setData('variableIds', JSON.stringify(checked));
+          } else {
+            e.dataTransfer.setData('variableIds', JSON.stringify([thisId]));
+            e.dataTransfer.setData('sourceCollectionId', row.dataset.sourceCollection);
+          }
+          e.dataTransfer.effectAllowed = 'move';
+          setTimeout(function() { row.classList.add('dragging'); }, 0);
+        });
+        row.addEventListener('dragend', function() {
+          row.classList.remove('dragging');
+          document.querySelectorAll('.collection-header').forEach(function(h) { h.classList.remove('drag-over'); });
+        });
+      });
+    }
+
+    function getCheckedIds() {
+      return Array.from(document.querySelectorAll('.var-checkbox:checked')).map(function(cb) {
+        return cb.dataset.variableId;
+      });
+    }
+
+    function handleCheckboxChange(e) {
+      e.stopPropagation();
+      updateSelectionBar();
+    }
+
+    function handleSelectAll(e, collectionId) {
+      e.stopPropagation();
+      const checked = e.target.checked;
+      document.querySelectorAll('.var-checkbox[data-source-collection="' + collectionId + '"]').forEach(function(cb) {
+        cb.checked = checked;
+      });
+      updateSelectionBar();
+    }
+
+    function updateSelectionBar() {
+      const checked = getCheckedIds();
+      const bar = document.getElementById('selection-bar');
+      const countEl = document.getElementById('selection-count');
+      const select = document.getElementById('target-collection-select');
+      if (!bar || !countEl || !select) return;
+
+      if (checked.length === 0) {
+        bar.style.display = 'none';
+        return;
+      }
+
+      bar.style.display = 'flex';
+      countEl.textContent = checked.length + ' selected';
+
+      // Populate collection options (exclude collections that all selected vars already belong to)
+      select.innerHTML = '<option value="" style="color:#0F1C2E;">Move to collection...</option>' +
+        _allCollections.map(function(col) {
+          return '<option value="' + col.id + '" style="color:#0F1C2E;">' + col.name + '</option>';
+        }).join('');
+    }
+
+    function clearSelection() {
+      document.querySelectorAll('.var-checkbox').forEach(function(cb) { cb.checked = false; });
+      document.querySelectorAll('.col-select-all').forEach(function(cb) { cb.checked = false; });
+      const bar = document.getElementById('selection-bar');
+      if (bar) bar.style.display = 'none';
+    }
+
+    function moveSelected() {
+      const targetCollectionId = document.getElementById('target-collection-select').value;
+      if (!targetCollectionId) { alert('Please select a target collection.'); return; }
+      const variableIds = getCheckedIds();
+      if (!variableIds.length) return;
+
+      // Optimistically move rows in the UI
+      const targetContainer = document.querySelector('.variables-container[data-collection-id="' + targetCollectionId + '"]');
+      variableIds.forEach(function(id) {
+        const row = document.querySelector('.variable-row[data-variable-id="' + id + '"]');
+        const cb = document.querySelector('.var-checkbox[data-variable-id="' + id + '"]');
+        if (row && targetContainer && row.dataset.sourceCollection !== targetCollectionId) {
+          row.dataset.sourceCollection = targetCollectionId;
+          if (cb) { cb.dataset.sourceCollection = targetCollectionId; cb.checked = false; }
+          targetContainer.appendChild(row);
+        }
+      });
+      updateCounts();
+      clearSelection();
+
+      parent.postMessage({ pluginMessage: { type: 'move-variables', variableIds, targetCollectionId } }, '*');
+    }
+
+    function updateCounts() {
+      document.querySelectorAll('.collection-block').forEach(function(block) {
+        const count = block.querySelectorAll('.variable-row').length;
+        const countEl = block.querySelector('.col-count');
+        if (countEl) countEl.textContent = count + ' var' + (count !== 1 ? 's' : '');
+      });
+    }
+
+    function handleColDragOver(e, el) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drag-over');
+    }
+
+    function handleColDragLeave(el) {
+      el.classList.remove('drag-over');
+    }
+
+    function handleColDrop(e, targetCollectionId, el) {
+      e.preventDefault();
+      el.classList.remove('drag-over');
+      const variableIds = JSON.parse(e.dataTransfer.getData('variableIds') || '[]');
+      if (!variableIds.length) return;
+
+      const targetContainer = document.querySelector('.variables-container[data-collection-id="' + targetCollectionId + '"]');
+      variableIds.forEach(function(id) {
+        const row = document.querySelector('.variable-row[data-variable-id="' + id + '"]');
+        const cb = document.querySelector('.var-checkbox[data-variable-id="' + id + '"]');
+        if (row && targetContainer && row.dataset.sourceCollection !== targetCollectionId) {
+          row.dataset.sourceCollection = targetCollectionId;
+          if (cb) { cb.dataset.sourceCollection = targetCollectionId; cb.checked = false; }
+          targetContainer.appendChild(row);
+        }
+      });
+      updateCounts();
+      clearSelection();
+
+      parent.postMessage({ pluginMessage: { type: 'move-variables', variableIds, targetCollectionId } }, '*');
+    }
+
     function showGitHubSettings() {
       document.getElementById('root').innerHTML = `
         <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 12px 20px;">
-          <button class="back-button" onclick="showDashboard()">
-            <span>←</span>
-            <span>Back</span>
-          </button>
-
-          <h2 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #0F1C2E;">GitHub Settings</h2>
-          <div style="font-size: 12px; color: #999; margin-bottom: 24px;">Configure your GitHub connection</div>
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">GitHub Settings</p>
+              <p class="screen-subtitle">Configure your GitHub connection</p>
+            </div>
+          </div>
 
           <div style="flex: 1; overflow-y: auto; min-height: 0;">
             <label class="input-label">Personal Access Token</label>
@@ -803,7 +1305,10 @@
       console.log('Message from plugin:', msg);
 
       if (msg.type === 'dashboard-data') {
+        const wasRefreshing = _isRefreshing;
+        _isRefreshing = false;
         renderDashboard(msg.data);
+        if (wasRefreshing) showRefreshSuccess();
       } else if (msg.type === 'figma-variables') {
         showComparison(msg.variables);
       } else if (msg.type === 'replace-complete') {
@@ -814,6 +1319,12 @@
         jsonTokens = msg.tokens;
         fileName = msg.filename;
         parent.postMessage({ pluginMessage: { type: 'get-variables' } }, '*');
+      } else if (msg.type === 'collections-data') {
+        renderCollections(msg.collections);
+      } else if (msg.type === 'variables-moved') {
+        // No-op: UI was already updated optimistically
+      } else if (msg.type === 'tokens-ready-for-push') {
+        pushToGitHub(msg.json);
       } else if (msg.type === 'download-json') {
         const blob = new Blob([msg.json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);

@@ -257,6 +257,56 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  if (msg.type === 'get-tokens-for-push') {
+    try {
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const exportData: any = {};
+
+      for (const collection of collections) {
+        for (const variableId of collection.variableIds) {
+          const variable = figma.variables.getVariableById(variableId);
+          if (variable) {
+            const defaultMode = collection.modes[0].modeId;
+            const value = variable.valuesByMode[defaultMode];
+
+            let formattedValue = value;
+            if (variable.resolvedType === 'COLOR' && typeof value === 'object') {
+              const r = Math.round((value as any).r * 255);
+              const g = Math.round((value as any).g * 255);
+              const b = Math.round((value as any).b * 255);
+              formattedValue = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+            }
+
+            const parts = variable.name.split('/');
+            let current = exportData;
+            for (let i = 0; i < parts.length - 1; i++) {
+              if (!current[parts[i]]) current[parts[i]] = {};
+              current = current[parts[i]];
+            }
+
+            const lastPart = parts[parts.length - 1];
+            current[lastPart] = {
+              $value: formattedValue,
+              $type: variable.resolvedType === 'COLOR' ? 'color' :
+                     variable.resolvedType === 'FLOAT' ? 'number' :
+                     variable.resolvedType === 'BOOLEAN' ? 'boolean' : 'string'
+            };
+          }
+        }
+      }
+
+      figma.ui.postMessage({
+        type: 'tokens-ready-for-push',
+        json: JSON.stringify(exportData, null, 2)
+      });
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        error: String(error)
+      });
+    }
+  }
+
   if (msg.type === 'get-variables') {
     try {
       const variables = await getFigmaVariables();
@@ -269,6 +319,69 @@ figma.ui.onmessage = async (msg) => {
         type: 'error',
         error: String(error)
       });
+    }
+  }
+
+  if (msg.type === 'get-collections') {
+    try {
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const result = collections.map(collection => {
+        const defaultMode = collection.modes[0].modeId;
+        const variables = collection.variableIds.map(id => {
+          const v = figma.variables.getVariableById(id);
+          if (!v) return null;
+          const value = v.valuesByMode[defaultMode];
+          let displayValue: any = value;
+          if (v.resolvedType === 'COLOR' && typeof value === 'object') {
+            const r = Math.round((value as any).r * 255);
+            const g = Math.round((value as any).g * 255);
+            const b = Math.round((value as any).b * 255);
+            displayValue = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+          } else if (typeof value === 'number') {
+            displayValue = value;
+          } else if (typeof value === 'boolean') {
+            displayValue = value;
+          } else {
+            displayValue = String(value);
+          }
+          return { id: v.id, name: v.name, type: v.resolvedType, value: displayValue };
+        }).filter(Boolean);
+        return { id: collection.id, name: collection.name, variables };
+      });
+      figma.ui.postMessage({ type: 'collections-data', collections: result });
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
+    }
+  }
+
+  if (msg.type === 'move-variables') {
+    try {
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const targetCollection = collections.find(c => c.id === msg.targetCollectionId);
+      if (!targetCollection) throw new Error('Target collection not found');
+
+      const targetMode = targetCollection.modes[0].modeId;
+      const variableIds: string[] = Array.isArray(msg.variableIds) ? msg.variableIds : [msg.variableIds];
+      let movedCount = 0;
+
+      for (const variableId of variableIds) {
+        const variable = figma.variables.getVariableById(variableId);
+        if (!variable) continue;
+        const sourceCollection = collections.find(c => c.variableIds.includes(variableId));
+        if (!sourceCollection || sourceCollection.id === targetCollection.id) continue;
+
+        const sourceMode = sourceCollection.modes[0].modeId;
+        const value = variable.valuesByMode[sourceMode];
+        const newVar = figma.variables.createVariable(variable.name, targetCollection, variable.resolvedType);
+        newVar.setValueForMode(targetMode, value);
+        variable.remove();
+        movedCount++;
+      }
+
+      figma.notify(`Moved ${movedCount} variable${movedCount !== 1 ? 's' : ''} to "${targetCollection.name}"`);
+      figma.ui.postMessage({ type: 'variables-moved' });
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
     }
   }
 
