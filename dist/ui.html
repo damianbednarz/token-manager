@@ -955,9 +955,6 @@
             <label class="input-label">Token File Path</label>
             <input type="text" class="input-field" id="github-path" placeholder="tokens/colors.json" />
 
-            <div style="background-color: #e8f5e9; border-radius: 8px; padding: 12px; margin-top: 16px; font-size: 11px; color: #2e7d32; border: 1px solid #c8e6c9;">
-              <strong>✓ Fetch tokens:</strong> You can now fetch tokens from GitHub. Push functionality (creating PRs) is coming soon.
-            </div>
           </div>
 
           <div style="background-color: #f5f5f5; padding: 16px 0 0 0; margin-top: 16px;">
@@ -1071,14 +1068,11 @@
           Object.keys(collectionObj).forEach(function(collectionName) {
             var collection = collectionObj[collectionName];
             if (collection && collection.modes && typeof collection.modes === 'object') {
-              // Use the first mode's tokens
               var modeNames = Object.keys(collection.modes);
               if (modeNames.length > 0) {
-                var modeTokens = collection.modes[modeNames[0]];
-                Object.assign(result, extractTokens(modeTokens, ''));
+                Object.assign(result, extractTokens(collection.modes[modeNames[0]], ''));
               }
             } else {
-              // Collection without modes wrapper
               Object.assign(result, extractTokens(collection, ''));
             }
           });
@@ -1086,7 +1080,7 @@
         return result;
       }
 
-      // Format 2: Object with a top-level "modes" key: { modes: { "Mode": { tokens } } }
+      // Format 2: Explicit "modes" key: { modes: { "Mode": { tokens } } }
       if (raw && raw.modes && typeof raw.modes === 'object') {
         var modeNames = Object.keys(raw.modes);
         if (modeNames.length > 0) {
@@ -1094,7 +1088,43 @@
         }
       }
 
-      // Format 3: Already flat or nested DTCG/Style Dictionary — just extract tokens
+      // Format 3: Single wrapper key containing mode-like children
+      // e.g. { "styles": { "light": { "background": "#fff" }, "dark": { ... } } }
+      // Detects when there's one top-level key whose children are all objects (potential modes)
+      var topKeys = Object.keys(raw);
+      if (topKeys.length === 1) {
+        var wrapper = raw[topKeys[0]];
+        if (wrapper && typeof wrapper === 'object' && !('$value' in wrapper) && !('value' in wrapper)) {
+          var childKeys = Object.keys(wrapper);
+          var allChildrenAreGroups = childKeys.length > 0 && childKeys.every(function(k) {
+            return wrapper[k] && typeof wrapper[k] === 'object' && !('$value' in wrapper[k]) && !('value' in wrapper[k]);
+          });
+          if (allChildrenAreGroups) {
+            // Treat children as modes — use the first one
+            return extractTokens(wrapper[childKeys[0]], '');
+          }
+        }
+      }
+
+      // Format 4: Top-level keys are all parallel mode-like objects sharing common token keys
+      // e.g. { "light": { "background": "#fff", "primary": "#000" }, "dark": { "background": "#000", ... } }
+      if (topKeys.length >= 2) {
+        var allAreGroups = topKeys.every(function(k) {
+          return raw[k] && typeof raw[k] === 'object' && !('$value' in raw[k]) && !('value' in raw[k]);
+        });
+        if (allAreGroups) {
+          var firstModeKeys = Object.keys(raw[topKeys[0]]);
+          var hasSharedKeys = topKeys.slice(1).some(function(k) {
+            return Object.keys(raw[k]).some(function(ck) { return firstModeKeys.indexOf(ck) !== -1; });
+          });
+          if (hasSharedKeys) {
+            // These look like parallel modes — use the first one
+            return extractTokens(raw[topKeys[0]], '');
+          }
+        }
+      }
+
+      // Format 5: DTCG / Style Dictionary nested structure (default)
       return extractTokens(raw, '');
     }
 
@@ -1110,7 +1140,13 @@
         var val = obj[key];
         var fullName = prefix ? prefix + '/' + key : key;
 
-        if (val && typeof val === 'object') {
+        if (val !== null && val !== undefined && typeof val !== 'object') {
+          // Primitive value (string, number, boolean) — treat as a token directly
+          result[fullName] = {
+            $value: val,
+            $type: guessType(val)
+          };
+        } else if (val && typeof val === 'object') {
           var hasValue = '$value' in val || 'value' in val;
 
           if (hasValue) {
