@@ -134,6 +134,98 @@ async function processTokens(tokens: Tokens, prefix: string = ''): Promise<{
   return results;
 }
 
+function lineHeightToString(lh: LineHeight): string {
+  if (lh.unit === 'AUTO') return 'AUTO';
+  return lh.unit === 'PERCENT' ? `${lh.value}%` : `${lh.value}px`;
+}
+
+function letterSpacingToString(ls: LetterSpacing): string {
+  return ls.unit === 'PERCENT' ? `${ls.value}%` : `${ls.value}px`;
+}
+
+function parseUnitValue(v: any): { unit: 'PIXELS' | 'PERCENT'; value: number } | { unit: 'AUTO' } | null {
+  if (typeof v === 'number') return { unit: 'PIXELS', value: v };
+  if (typeof v !== 'string') return null;
+  if (v === 'AUTO') return { unit: 'AUTO' };
+  const m = v.match(/^(-?\d+(?:\.\d+)?)\s*(px|%)?$/);
+  if (!m) return null;
+  return { unit: m[2] === '%' ? 'PERCENT' : 'PIXELS', value: parseFloat(m[1]) };
+}
+
+async function buildTypographyTokens(): Promise<any> {
+  const styles = await figma.getLocalTextStylesAsync();
+  const out: any = {};
+
+  for (const style of styles) {
+    const value: any = {
+      fontFamily: style.fontName.family,
+      fontWeight: style.fontName.style,
+      fontSize: style.fontSize,
+      lineHeight: lineHeightToString(style.lineHeight),
+      letterSpacing: letterSpacingToString(style.letterSpacing),
+      paragraphSpacing: style.paragraphSpacing,
+      paragraphIndent: style.paragraphIndent,
+      textCase: style.textCase,
+      textDecoration: style.textDecoration
+    };
+
+    const parts = style.name.split('/');
+    let cursor = out;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!cursor[parts[i]] || typeof cursor[parts[i]] !== 'object') {
+        cursor[parts[i]] = {};
+      }
+      cursor = cursor[parts[i]];
+    }
+    cursor[parts[parts.length - 1]] = { $type: 'typography', $value: value };
+  }
+
+  return out;
+}
+
+function flattenTypography(obj: any, prefix: string = ''): Record<string, any> {
+  const out: Record<string, any> = {};
+  if (!obj || typeof obj !== 'object') return out;
+
+  for (const key of Object.keys(obj)) {
+    if (key.startsWith('$')) continue;
+    const val = obj[key];
+    if (!val || typeof val !== 'object') continue;
+
+    const fullName = prefix ? `${prefix}/${key}` : key;
+    const tokenValue = val.$value !== undefined ? val.$value : val.value;
+    const tokenType = val.$type || val.type;
+    const looksLikeTypography = tokenValue && typeof tokenValue === 'object'
+      && (tokenType === 'typography' || 'fontFamily' in tokenValue || 'fontSize' in tokenValue);
+
+    if (looksLikeTypography) {
+      out[fullName] = tokenValue;
+    } else {
+      Object.assign(out, flattenTypography(val, fullName));
+    }
+  }
+
+  return out;
+}
+
+function applyTypography(style: TextStyle, val: any): void {
+  if (val.fontFamily && val.fontWeight) {
+    style.fontName = { family: String(val.fontFamily), style: String(val.fontWeight) };
+  }
+  if (typeof val.fontSize === 'number') style.fontSize = val.fontSize;
+
+  const lh = parseUnitValue(val.lineHeight);
+  if (lh) style.lineHeight = lh as LineHeight;
+
+  const ls = parseUnitValue(val.letterSpacing);
+  if (ls && ls.unit !== 'AUTO') style.letterSpacing = ls as LetterSpacing;
+
+  if (typeof val.paragraphSpacing === 'number') style.paragraphSpacing = val.paragraphSpacing;
+  if (typeof val.paragraphIndent === 'number') style.paragraphIndent = val.paragraphIndent;
+  if (val.textCase) style.textCase = val.textCase as TextCase;
+  if (val.textDecoration) style.textDecoration = val.textDecoration as TextDecoration;
+}
+
 async function getFigmaVariables() {
   const collections = await figma.variables.getLocalVariableCollectionsAsync();
   const variables: any[] = [];
@@ -384,6 +476,104 @@ figma.ui.onmessage = async (msg) => {
 
       figma.notify(`Moved ${movedCount} variable${movedCount !== 1 ? 's' : ''} to "${targetCollection.name}"`);
       figma.ui.postMessage({ type: 'variables-moved' });
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
+    }
+  }
+
+  if (msg.type === 'get-text-styles') {
+    try {
+      const tokens = await buildTypographyTokens();
+      figma.ui.postMessage({ type: 'text-styles-data', tokens });
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
+    }
+  }
+
+  if (msg.type === 'export-text-styles') {
+    try {
+      const tokens = await buildTypographyTokens();
+      figma.ui.postMessage({
+        type: 'download-json',
+        json: JSON.stringify(tokens, null, 2),
+        filename: 'figma-typography.json'
+      });
+      figma.notify('Text styles exported');
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
+    }
+  }
+
+  if (msg.type === 'import-text-styles') {
+    try {
+      const flat = flattenTypography(msg.tokens);
+      const names = Object.keys(flat);
+      if (names.length === 0) {
+        figma.ui.postMessage({ type: 'error', error: 'No typography tokens found in JSON.' });
+        return;
+      }
+
+      // Pre-load every (family, style) pair we'll need
+      const fontPairs = new Set<string>();
+      for (const name of names) {
+        const v = flat[name];
+        if (v && v.fontFamily && v.fontWeight) {
+          fontPairs.add(JSON.stringify({ family: String(v.fontFamily), style: String(v.fontWeight) }));
+        }
+      }
+      const loadedFonts = new Set<string>();
+      await Promise.all(Array.from(fontPairs).map(async (key) => {
+        const fn = JSON.parse(key);
+        try {
+          await figma.loadFontAsync(fn);
+          loadedFonts.add(key);
+        } catch (e) {
+          // Font unavailable on this machine — styles using it will be skipped
+        }
+      }));
+
+      const existing = await figma.getLocalTextStylesAsync();
+      const byName = new Map<string, TextStyle>();
+      existing.forEach((s) => byName.set(s.name, s));
+
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+
+      for (const name of names) {
+        const val = flat[name];
+        try {
+          const requiredFontKey = val.fontFamily && val.fontWeight
+            ? JSON.stringify({ family: String(val.fontFamily), style: String(val.fontWeight) })
+            : null;
+
+          if (requiredFontKey && !loadedFonts.has(requiredFontKey)) {
+            errors.push(`${name}: font "${val.fontFamily} ${val.fontWeight}" not available`);
+            skipped++;
+            continue;
+          }
+
+          let style = byName.get(name);
+          let isNew = false;
+          if (!style) {
+            style = figma.createTextStyle();
+            style.name = name;
+            isNew = true;
+          }
+          applyTypography(style, val);
+          if (isNew) created++; else updated++;
+        } catch (e) {
+          errors.push(`${name}: ${String(e)}`);
+          skipped++;
+        }
+      }
+
+      figma.notify(`Typography: ${created} created, ${updated} updated${skipped ? `, ${skipped} skipped` : ''}`);
+      figma.ui.postMessage({
+        type: 'typography-import-complete',
+        results: { created, updated, skipped, errors }
+      });
     } catch (error) {
       figma.ui.postMessage({ type: 'error', error: String(error) });
     }

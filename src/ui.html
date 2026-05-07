@@ -536,6 +536,12 @@
             <span>Collection Manager</span>
             <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
           </button>
+
+          <button class="action-button" onclick="showTypographyManager()">
+            <span class="action-icon">🔤</span>
+            <span>Typography Manager</span>
+            <span style="margin-left: auto; background: #434343; color: #BBBBBB; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">NEW</span>
+          </button>
         </div>
       `;
     }
@@ -973,6 +979,74 @@
       parent.postMessage({ pluginMessage: { type: 'move-variables', variableIds, targetCollectionId } }, '*');
     }
 
+    var _typographyTokens = null;
+
+    function showTypographyManager() {
+      _typographyTokens = null;
+      document.getElementById('root').innerHTML = `
+        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">Typography Manager</p>
+              <p class="screen-subtitle">Local text styles in this file</p>
+            </div>
+          </div>
+
+          <div style="flex: 1; overflow: auto; min-height: 0; margin-bottom: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
+            <pre id="typography-json" style="margin: 0; font-family: 'SF Mono', Monaco, 'Courier New', monospace; font-size: 11px; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; line-height: 1.5;">Loading...</pre>
+          </div>
+
+          <input type="file" accept=".json" id="typography-file-input" style="display: none;" onchange="handleTypographyImportFile(event)" />
+
+          <div style="background-color: var(--bg); padding: 16px 0 12px 0; display: flex; gap: 8px;">
+            <button class="button-secondary" style="margin-top: 0; flex: 1;" onclick="document.getElementById('typography-file-input').click()">📥 Import</button>
+            <button class="button-primary" style="margin-top: 0; flex: 1;" id="typography-export-btn" onclick="exportTypography()">📤 Export</button>
+          </div>
+        </div>
+      `;
+      parent.postMessage({ pluginMessage: { type: 'get-text-styles' } }, '*');
+    }
+
+    function renderTypography(tokens) {
+      _typographyTokens = tokens;
+      const el = document.getElementById('typography-json');
+      const exportBtn = document.getElementById('typography-export-btn');
+      if (!el) return;
+      const isEmpty = !tokens || Object.keys(tokens).length === 0;
+      if (isEmpty) {
+        el.textContent = 'No local text styles found in this file.';
+        if (exportBtn) { exportBtn.disabled = true; exportBtn.style.opacity = '0.5'; exportBtn.style.cursor = 'not-allowed'; }
+      } else {
+        el.textContent = JSON.stringify(tokens, null, 2);
+        if (exportBtn) { exportBtn.disabled = false; exportBtn.style.opacity = ''; exportBtn.style.cursor = ''; }
+      }
+    }
+
+    function exportTypography() {
+      if (!_typographyTokens || Object.keys(_typographyTokens).length === 0) {
+        alert('No text styles to export.');
+        return;
+      }
+      parent.postMessage({ pluginMessage: { type: 'export-text-styles' } }, '*');
+    }
+
+    function handleTypographyImportFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        try {
+          const json = JSON.parse(ev.target.result);
+          parent.postMessage({ pluginMessage: { type: 'import-text-styles', tokens: json } }, '*');
+        } catch (err) {
+          alert('Invalid JSON: ' + err);
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    }
+
     function showGitHubSettings() {
       document.getElementById('root').innerHTML = `
         <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 12px 20px;">
@@ -1406,6 +1480,17 @@
         // No-op: UI was already updated optimistically
       } else if (msg.type === 'tokens-ready-for-push') {
         pushToGitHub(msg.json);
+      } else if (msg.type === 'text-styles-data') {
+        renderTypography(msg.tokens);
+      } else if (msg.type === 'typography-import-complete') {
+        const r = msg.results || {};
+        const parts = [];
+        if (r.created) parts.push(r.created + ' created');
+        if (r.updated) parts.push(r.updated + ' updated');
+        if (r.skipped) parts.push(r.skipped + ' skipped');
+        alert('Import complete: ' + (parts.join(', ') || 'nothing changed') +
+          (r.errors && r.errors.length ? '\n\nErrors:\n' + r.errors.slice(0, 5).join('\n') : ''));
+        parent.postMessage({ pluginMessage: { type: 'get-text-styles' } }, '*');
       } else if (msg.type === 'download-json') {
         const blob = new Blob([msg.json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);

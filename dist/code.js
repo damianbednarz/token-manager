@@ -123,6 +123,98 @@
           return results;
         });
       }
+      function lineHeightToString(lh) {
+        if (lh.unit === "AUTO")
+          return "AUTO";
+        return lh.unit === "PERCENT" ? `${lh.value}%` : `${lh.value}px`;
+      }
+      function letterSpacingToString(ls) {
+        return ls.unit === "PERCENT" ? `${ls.value}%` : `${ls.value}px`;
+      }
+      function parseUnitValue(v) {
+        if (typeof v === "number")
+          return { unit: "PIXELS", value: v };
+        if (typeof v !== "string")
+          return null;
+        if (v === "AUTO")
+          return { unit: "AUTO" };
+        const m = v.match(/^(-?\d+(?:\.\d+)?)\s*(px|%)?$/);
+        if (!m)
+          return null;
+        return { unit: m[2] === "%" ? "PERCENT" : "PIXELS", value: parseFloat(m[1]) };
+      }
+      function buildTypographyTokens() {
+        return __async(this, null, function* () {
+          const styles = yield figma.getLocalTextStylesAsync();
+          const out = {};
+          for (const style of styles) {
+            const value = {
+              fontFamily: style.fontName.family,
+              fontWeight: style.fontName.style,
+              fontSize: style.fontSize,
+              lineHeight: lineHeightToString(style.lineHeight),
+              letterSpacing: letterSpacingToString(style.letterSpacing),
+              paragraphSpacing: style.paragraphSpacing,
+              paragraphIndent: style.paragraphIndent,
+              textCase: style.textCase,
+              textDecoration: style.textDecoration
+            };
+            const parts = style.name.split("/");
+            let cursor = out;
+            for (let i = 0; i < parts.length - 1; i++) {
+              if (!cursor[parts[i]] || typeof cursor[parts[i]] !== "object") {
+                cursor[parts[i]] = {};
+              }
+              cursor = cursor[parts[i]];
+            }
+            cursor[parts[parts.length - 1]] = { $type: "typography", $value: value };
+          }
+          return out;
+        });
+      }
+      function flattenTypography(obj, prefix = "") {
+        const out = {};
+        if (!obj || typeof obj !== "object")
+          return out;
+        for (const key of Object.keys(obj)) {
+          if (key.startsWith("$"))
+            continue;
+          const val = obj[key];
+          if (!val || typeof val !== "object")
+            continue;
+          const fullName = prefix ? `${prefix}/${key}` : key;
+          const tokenValue = val.$value !== void 0 ? val.$value : val.value;
+          const tokenType = val.$type || val.type;
+          const looksLikeTypography = tokenValue && typeof tokenValue === "object" && (tokenType === "typography" || "fontFamily" in tokenValue || "fontSize" in tokenValue);
+          if (looksLikeTypography) {
+            out[fullName] = tokenValue;
+          } else {
+            Object.assign(out, flattenTypography(val, fullName));
+          }
+        }
+        return out;
+      }
+      function applyTypography(style, val) {
+        if (val.fontFamily && val.fontWeight) {
+          style.fontName = { family: String(val.fontFamily), style: String(val.fontWeight) };
+        }
+        if (typeof val.fontSize === "number")
+          style.fontSize = val.fontSize;
+        const lh = parseUnitValue(val.lineHeight);
+        if (lh)
+          style.lineHeight = lh;
+        const ls = parseUnitValue(val.letterSpacing);
+        if (ls && ls.unit !== "AUTO")
+          style.letterSpacing = ls;
+        if (typeof val.paragraphSpacing === "number")
+          style.paragraphSpacing = val.paragraphSpacing;
+        if (typeof val.paragraphIndent === "number")
+          style.paragraphIndent = val.paragraphIndent;
+        if (val.textCase)
+          style.textCase = val.textCase;
+        if (val.textDecoration)
+          style.textDecoration = val.textDecoration;
+      }
       function getFigmaVariables() {
         return __async(this, null, function* () {
           const collections = yield figma.variables.getLocalVariableCollectionsAsync();
@@ -345,6 +437,93 @@
             }
             figma.notify(`Moved ${movedCount} variable${movedCount !== 1 ? "s" : ""} to "${targetCollection.name}"`);
             figma.ui.postMessage({ type: "variables-moved" });
+          } catch (error) {
+            figma.ui.postMessage({ type: "error", error: String(error) });
+          }
+        }
+        if (msg.type === "get-text-styles") {
+          try {
+            const tokens = yield buildTypographyTokens();
+            figma.ui.postMessage({ type: "text-styles-data", tokens });
+          } catch (error) {
+            figma.ui.postMessage({ type: "error", error: String(error) });
+          }
+        }
+        if (msg.type === "export-text-styles") {
+          try {
+            const tokens = yield buildTypographyTokens();
+            figma.ui.postMessage({
+              type: "download-json",
+              json: JSON.stringify(tokens, null, 2),
+              filename: "figma-typography.json"
+            });
+            figma.notify("Text styles exported");
+          } catch (error) {
+            figma.ui.postMessage({ type: "error", error: String(error) });
+          }
+        }
+        if (msg.type === "import-text-styles") {
+          try {
+            const flat = flattenTypography(msg.tokens);
+            const names = Object.keys(flat);
+            if (names.length === 0) {
+              figma.ui.postMessage({ type: "error", error: "No typography tokens found in JSON." });
+              return;
+            }
+            const fontPairs = /* @__PURE__ */ new Set();
+            for (const name of names) {
+              const v = flat[name];
+              if (v && v.fontFamily && v.fontWeight) {
+                fontPairs.add(JSON.stringify({ family: String(v.fontFamily), style: String(v.fontWeight) }));
+              }
+            }
+            const loadedFonts = /* @__PURE__ */ new Set();
+            yield Promise.all(Array.from(fontPairs).map((key) => __async(exports, null, function* () {
+              const fn = JSON.parse(key);
+              try {
+                yield figma.loadFontAsync(fn);
+                loadedFonts.add(key);
+              } catch (e) {
+              }
+            })));
+            const existing = yield figma.getLocalTextStylesAsync();
+            const byName = /* @__PURE__ */ new Map();
+            existing.forEach((s) => byName.set(s.name, s));
+            let created = 0;
+            let updated = 0;
+            let skipped = 0;
+            const errors = [];
+            for (const name of names) {
+              const val = flat[name];
+              try {
+                const requiredFontKey = val.fontFamily && val.fontWeight ? JSON.stringify({ family: String(val.fontFamily), style: String(val.fontWeight) }) : null;
+                if (requiredFontKey && !loadedFonts.has(requiredFontKey)) {
+                  errors.push(`${name}: font "${val.fontFamily} ${val.fontWeight}" not available`);
+                  skipped++;
+                  continue;
+                }
+                let style = byName.get(name);
+                let isNew = false;
+                if (!style) {
+                  style = figma.createTextStyle();
+                  style.name = name;
+                  isNew = true;
+                }
+                applyTypography(style, val);
+                if (isNew)
+                  created++;
+                else
+                  updated++;
+              } catch (e) {
+                errors.push(`${name}: ${String(e)}`);
+                skipped++;
+              }
+            }
+            figma.notify(`Typography: ${created} created, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}`);
+            figma.ui.postMessage({
+              type: "typography-import-complete",
+              results: { created, updated, skipped, errors }
+            });
           } catch (error) {
             figma.ui.postMessage({ type: "error", error: String(error) });
           }
