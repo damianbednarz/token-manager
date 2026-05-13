@@ -1851,6 +1851,79 @@
           return stats;
         });
       }
+      function formatVariableValue(variable, value) {
+        if (variable.resolvedType === "COLOR" && typeof value === "object") {
+          const r = Math.round(value.r * 255);
+          const g = Math.round(value.g * 255);
+          const b = Math.round(value.b * 255);
+          return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+        }
+        return value;
+      }
+      function getTokenType(variable) {
+        return variable.resolvedType === "COLOR" ? "color" : variable.resolvedType === "FLOAT" ? "number" : variable.resolvedType === "BOOLEAN" ? "boolean" : "string";
+      }
+      function setNestedTokenValue(target, variableName, token) {
+        const parts = variableName.split("/");
+        let current = target;
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (!current[parts[i]]) {
+            current[parts[i]] = {};
+          }
+          current = current[parts[i]];
+        }
+        current[parts[parts.length - 1]] = token;
+      }
+      function buildVariableExportData(collections) {
+        return __async(this, null, function* () {
+          var _a;
+          const sourceCollections = collections || (yield figma.variables.getLocalVariableCollectionsAsync());
+          const hasMultiModeCollection = sourceCollections.some((collection) => collection.modes.length > 1);
+          if (!hasMultiModeCollection) {
+            const exportData2 = {};
+            for (const collection of sourceCollections) {
+              const defaultMode = (_a = collection.modes[0]) == null ? void 0 : _a.modeId;
+              if (!defaultMode)
+                continue;
+              for (const variableId of collection.variableIds) {
+                const variable = figma.variables.getVariableById(variableId);
+                if (!variable)
+                  continue;
+                const value = variable.valuesByMode[defaultMode];
+                if (value === void 0)
+                  continue;
+                setNestedTokenValue(exportData2, variable.name, {
+                  $value: formatVariableValue(variable, value),
+                  $type: getTokenType(variable)
+                });
+              }
+            }
+            return exportData2;
+          }
+          const exportData = [];
+          for (const collection of sourceCollections) {
+            const collectionData = { modes: {} };
+            for (const mode of collection.modes) {
+              const modeData = {};
+              for (const variableId of collection.variableIds) {
+                const variable = figma.variables.getVariableById(variableId);
+                if (!variable)
+                  continue;
+                const value = variable.valuesByMode[mode.modeId];
+                if (value === void 0)
+                  continue;
+                setNestedTokenValue(modeData, variable.name, {
+                  $value: formatVariableValue(variable, value),
+                  $type: getTokenType(variable)
+                });
+              }
+              collectionData.modes[mode.name] = modeData;
+            }
+            exportData.push({ [collection.name]: collectionData });
+          }
+          return exportData;
+        });
+      }
       function getFigmaVariables() {
         return __async(this, null, function* () {
           const collections = yield figma.variables.getLocalVariableCollectionsAsync();
@@ -1916,36 +1989,7 @@
             const allCollections = yield figma.variables.getLocalVariableCollectionsAsync();
             const filterIds = Array.isArray(msg.collectionIds) ? msg.collectionIds : void 0;
             const collections = filterIds && filterIds.length > 0 ? allCollections.filter((c) => filterIds.indexOf(c.id) !== -1) : allCollections;
-            const exportData = {};
-            for (const collection of collections) {
-              for (const variableId of collection.variableIds) {
-                const variable = figma.variables.getVariableById(variableId);
-                if (variable) {
-                  const defaultMode = collection.modes[0].modeId;
-                  const value = variable.valuesByMode[defaultMode];
-                  let formattedValue = value;
-                  if (variable.resolvedType === "COLOR" && typeof value === "object") {
-                    const r = Math.round(value.r * 255);
-                    const g = Math.round(value.g * 255);
-                    const b = Math.round(value.b * 255);
-                    formattedValue = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
-                  }
-                  const parts = variable.name.split("/");
-                  let current = exportData;
-                  for (let i = 0; i < parts.length - 1; i++) {
-                    if (!current[parts[i]]) {
-                      current[parts[i]] = {};
-                    }
-                    current = current[parts[i]];
-                  }
-                  const lastPart = parts[parts.length - 1];
-                  current[lastPart] = {
-                    $value: formattedValue,
-                    $type: variable.resolvedType === "COLOR" ? "color" : variable.resolvedType === "FLOAT" ? "number" : variable.resolvedType === "BOOLEAN" ? "boolean" : "string"
-                  };
-                }
-              }
-            }
+            const exportData = yield buildVariableExportData(collections);
             const jsonString = JSON.stringify(exportData, null, 2);
             figma.ui.postMessage({
               type: "download-json",
@@ -1962,36 +2006,7 @@
         }
         if (msg.type === "get-tokens-for-push") {
           try {
-            const collections = yield figma.variables.getLocalVariableCollectionsAsync();
-            const exportData = {};
-            for (const collection of collections) {
-              for (const variableId of collection.variableIds) {
-                const variable = figma.variables.getVariableById(variableId);
-                if (variable) {
-                  const defaultMode = collection.modes[0].modeId;
-                  const value = variable.valuesByMode[defaultMode];
-                  let formattedValue = value;
-                  if (variable.resolvedType === "COLOR" && typeof value === "object") {
-                    const r = Math.round(value.r * 255);
-                    const g = Math.round(value.g * 255);
-                    const b = Math.round(value.b * 255);
-                    formattedValue = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
-                  }
-                  const parts = variable.name.split("/");
-                  let current = exportData;
-                  for (let i = 0; i < parts.length - 1; i++) {
-                    if (!current[parts[i]])
-                      current[parts[i]] = {};
-                    current = current[parts[i]];
-                  }
-                  const lastPart = parts[parts.length - 1];
-                  current[lastPart] = {
-                    $value: formattedValue,
-                    $type: variable.resolvedType === "COLOR" ? "color" : variable.resolvedType === "FLOAT" ? "number" : variable.resolvedType === "BOOLEAN" ? "boolean" : "string"
-                  };
-                }
-              }
-            }
+            const exportData = yield buildVariableExportData();
             figma.ui.postMessage({
               type: "tokens-ready-for-push",
               json: JSON.stringify(exportData, null, 2)
