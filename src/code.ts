@@ -1,7 +1,7 @@
 // This file runs in the Figma plugin sandbox
 // It has access to the Figma API but not to browser APIs
 
-import { THEMES, STYLES, BASE_THEMES, DEFAULT_BASE } from './create-data';
+import { THEMES, STYLES, BASE_THEMES, DEFAULT_BASE, STYLE_RADIUS } from './create-data';
 
 figma.showUI(__html__, { width: 450, height: 600 });
 
@@ -870,8 +870,75 @@ figma.ui.onmessage = async (msg) => {
         if (!found) unmatched.push(tokenName);
       }
 
-      figma.notify('Applied "' + themeName + '" — ' + updated + ' variable' + (updated !== 1 ? 's' : '') + ' updated');
-      figma.ui.postMessage({ type: 'apply-theme-complete', updated, unmatched });
+      // Apply style-driven radius override. The chosen style sets the LG anchor
+      // (`--radius` in bejamas/ui CSS); other sizes follow bejamas's actual calc() formulas:
+      //   sm = lg - 4, md = lg - 2, lg = anchor, xl = lg + 4, 2xl = lg + 8, 3xl = lg + 16
+      // `xs` isn't defined by bejamas — extrapolated linearly (sm - 2) so it stays distinct.
+      // Negative results clamp to 0 (a radius can't be negative); positives pass through, so
+      // Lyra's xl/2xl/3xl correctly end up at 4/8/16 even though lg = 0.
+      const SIZE_OFFSETS: Record<string, number> = {
+        xs: -6, sm: -4, md: -2, lg: 0, xl: 4, '2xl': 8, '3xl': 16,
+        small: -4, medium: -2, large: 0
+      };
+      const NEUTRAL_SIZES = new Set(['none', 'full', 'round', 'pill', 'circle']);
+      const SIZE_REGEX = /(?:^|[^a-z0-9])(3xl|2xl|xl|lg|md|sm|xs|small|medium|large|none|full|round|pill|circle)(?:$|[^a-z0-9])/i;
+
+      let radiusUpdated = 0;
+      let radiusFailed = 0;
+      let radiusFloatCount = 0;
+      let radiusNameMatched = 0;
+      const radiusSamples: string[] = [];
+      const radiusFailures: string[] = [];
+      const floatSamples: string[] = [];
+      const styleName: string | undefined = msg.styleName;
+      const radiusBase = styleName ? STYLE_RADIUS[styleName] : null;
+
+      if (radiusBase !== null && radiusBase !== undefined) {
+        for (const collection of collections) {
+          for (const id of collection.variableIds) {
+            const v = await figma.variables.getVariableByIdAsync(id);
+            if (!v || v.resolvedType !== 'FLOAT') continue;
+            radiusFloatCount++;
+            if (floatSamples.length < 8) floatSamples.push(v.name);
+
+            const lower = v.name.toLowerCase();
+            if (lower.indexOf('radius') === -1 && lower.indexOf('rounded') === -1) continue;
+            radiusNameMatched++;
+
+            const sizeMatch = lower.match(SIZE_REGEX);
+            const size = sizeMatch ? sizeMatch[1] : null;
+            if (size && NEUTRAL_SIZES.has(size)) continue;
+
+            const offset = (size && SIZE_OFFSETS[size] !== undefined) ? SIZE_OFFSETS[size] : 0;
+            const target = Math.max(0, radiusBase + offset);
+
+            let wroteOne = false;
+            for (const mode of collection.modes) {
+              try {
+                v.setValueForMode(mode.modeId, target);
+                wroteOne = true;
+              } catch (e) {
+                if (radiusFailures.length < 5) radiusFailures.push(v.name + ' [' + mode.name + ']: ' + String(e));
+              }
+            }
+            if (wroteOne) {
+              radiusUpdated++;
+              if (radiusSamples.length < 8) radiusSamples.push(v.name + ' → ' + target);
+            } else {
+              radiusFailed++;
+            }
+          }
+        }
+      }
+
+      const parts: string[] = [updated + ' color variable' + (updated !== 1 ? 's' : '')];
+      if (radiusUpdated > 0) parts.push(radiusUpdated + ' radius variable' + (radiusUpdated !== 1 ? 's' : ''));
+      figma.notify('Applied "' + themeName + '" — ' + parts.join(', '));
+      figma.ui.postMessage({
+        type: 'apply-theme-complete',
+        updated, radiusUpdated, radiusFailed, radiusFloatCount, radiusNameMatched,
+        radiusSamples, radiusFailures, floatSamples, unmatched
+      });
     } catch (error) {
       figma.ui.postMessage({ type: 'error', error: String(error) });
     }

@@ -1814,7 +1814,28 @@
       } else if (msg.type === 'apply-theme-complete') {
         const btn = document.getElementById('create-apply-btn');
         if (btn) { btn.disabled = false; btn.textContent = 'Apply theme'; }
-        const lines = ['Updated ' + msg.updated + ' variable' + (msg.updated !== 1 ? 's' : '') + '.'];
+        const parts = ['Updated ' + msg.updated + ' color variable' + (msg.updated !== 1 ? 's' : '')];
+        if (msg.radiusUpdated) parts.push(msg.radiusUpdated + ' radius variable' + (msg.radiusUpdated !== 1 ? 's' : ''));
+        const lines = [parts.join(' and ') + '.'];
+
+        if (msg.radiusUpdated && msg.radiusSamples && msg.radiusSamples.length) {
+          lines.push('');
+          lines.push('Radius writes: ' + msg.radiusSamples.join(', '));
+        }
+        // Diagnostic: nothing got updated even though radius application was attempted
+        if (msg.radiusFloatCount !== undefined && msg.radiusUpdated === 0 && msg.radiusFloatCount > 0) {
+          lines.push('');
+          lines.push('Radius diagnostic:');
+          lines.push('  FLOAT variables scanned: ' + msg.radiusFloatCount);
+          lines.push('  Names containing "radius"/"rounded": ' + msg.radiusNameMatched);
+          if (msg.radiusFailed) lines.push('  setValueForMode failed on: ' + msg.radiusFailed);
+          if (msg.floatSamples && msg.floatSamples.length) {
+            lines.push('  Sample FLOAT names: ' + msg.floatSamples.slice(0, 5).join(', '));
+          }
+          if (msg.radiusFailures && msg.radiusFailures.length) {
+            lines.push('  First failure: ' + msg.radiusFailures[0]);
+          }
+        }
         if (msg.unmatched && msg.unmatched.length) {
           lines.push('');
           lines.push('No matching variable found for: ' + msg.unmatched.slice(0, 8).join(', ') +

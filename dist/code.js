@@ -29,12 +29,21 @@
   };
 
   // src/create-data.ts
-  var BASE_THEMES, DEFAULT_BASE, STYLES, THEMES;
+  var BASE_THEMES, DEFAULT_BASE, STYLE_RADIUS, STYLES, THEMES;
   var init_create_data = __esm({
     "src/create-data.ts"() {
       "use strict";
       BASE_THEMES = ["neutral", "stone", "zinc", "mauve", "olive", "mist", "taupe"];
       DEFAULT_BASE = "neutral";
+      STYLE_RADIUS = {
+        juno: 10,
+        vega: 10,
+        nova: 10,
+        lyra: 0,
+        maia: 14,
+        mira: 10,
+        luma: 10
+      };
       STYLES = [
         {
           "name": "juno",
@@ -2195,8 +2204,84 @@
               if (!found)
                 unmatched.push(tokenName);
             }
-            figma.notify('Applied "' + themeName + '" \u2014 ' + updated + " variable" + (updated !== 1 ? "s" : "") + " updated");
-            figma.ui.postMessage({ type: "apply-theme-complete", updated, unmatched });
+            const SIZE_OFFSETS = {
+              xs: -6,
+              sm: -4,
+              md: -2,
+              lg: 0,
+              xl: 4,
+              "2xl": 8,
+              "3xl": 16,
+              small: -4,
+              medium: -2,
+              large: 0
+            };
+            const NEUTRAL_SIZES = /* @__PURE__ */ new Set(["none", "full", "round", "pill", "circle"]);
+            const SIZE_REGEX = /(?:^|[^a-z0-9])(3xl|2xl|xl|lg|md|sm|xs|small|medium|large|none|full|round|pill|circle)(?:$|[^a-z0-9])/i;
+            let radiusUpdated = 0;
+            let radiusFailed = 0;
+            let radiusFloatCount = 0;
+            let radiusNameMatched = 0;
+            const radiusSamples = [];
+            const radiusFailures = [];
+            const floatSamples = [];
+            const styleName = msg.styleName;
+            const radiusBase = styleName ? STYLE_RADIUS[styleName] : null;
+            if (radiusBase !== null && radiusBase !== void 0) {
+              for (const collection of collections) {
+                for (const id of collection.variableIds) {
+                  const v = yield figma.variables.getVariableByIdAsync(id);
+                  if (!v || v.resolvedType !== "FLOAT")
+                    continue;
+                  radiusFloatCount++;
+                  if (floatSamples.length < 8)
+                    floatSamples.push(v.name);
+                  const lower = v.name.toLowerCase();
+                  if (lower.indexOf("radius") === -1 && lower.indexOf("rounded") === -1)
+                    continue;
+                  radiusNameMatched++;
+                  const sizeMatch = lower.match(SIZE_REGEX);
+                  const size = sizeMatch ? sizeMatch[1] : null;
+                  if (size && NEUTRAL_SIZES.has(size))
+                    continue;
+                  const offset = size && SIZE_OFFSETS[size] !== void 0 ? SIZE_OFFSETS[size] : 0;
+                  const target = Math.max(0, radiusBase + offset);
+                  let wroteOne = false;
+                  for (const mode of collection.modes) {
+                    try {
+                      v.setValueForMode(mode.modeId, target);
+                      wroteOne = true;
+                    } catch (e) {
+                      if (radiusFailures.length < 5)
+                        radiusFailures.push(v.name + " [" + mode.name + "]: " + String(e));
+                    }
+                  }
+                  if (wroteOne) {
+                    radiusUpdated++;
+                    if (radiusSamples.length < 8)
+                      radiusSamples.push(v.name + " \u2192 " + target);
+                  } else {
+                    radiusFailed++;
+                  }
+                }
+              }
+            }
+            const parts = [updated + " color variable" + (updated !== 1 ? "s" : "")];
+            if (radiusUpdated > 0)
+              parts.push(radiusUpdated + " radius variable" + (radiusUpdated !== 1 ? "s" : ""));
+            figma.notify('Applied "' + themeName + '" \u2014 ' + parts.join(", "));
+            figma.ui.postMessage({
+              type: "apply-theme-complete",
+              updated,
+              radiusUpdated,
+              radiusFailed,
+              radiusFloatCount,
+              radiusNameMatched,
+              radiusSamples,
+              radiusFailures,
+              floatSamples,
+              unmatched
+            });
           } catch (error) {
             figma.ui.postMessage({ type: "error", error: String(error) });
           }
