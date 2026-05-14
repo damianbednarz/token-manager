@@ -513,18 +513,6 @@
 
           <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Quick Actions</div>
 
-          <button class="action-button" onclick="showUploadScreen()">
-            <span class="action-icon">📥</span>
-            <span>Import JSON File</span>
-          </button>
-
-          ${currentVariableCount > 0 ? `
-            <button class="action-button" onclick="exportTokens()">
-              <span class="action-icon">📤</span>
-              <span>Export Tokens as JSON</span>
-            </button>
-          ` : ''}
-
           <button class="action-button ${!data.githubConnected ? 'action-button-disabled' : ''}" ${!data.githubConnected ? 'disabled' : 'onclick="showPushScreen()"'}>
             <span class="action-icon">🚀</span>
             <span>Push to GitHub</span>
