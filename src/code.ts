@@ -1,6 +1,8 @@
 // This file runs in the Figma plugin sandbox
 // It has access to the Figma API but not to browser APIs
 
+import { THEMES, STYLES, BASE_THEMES, DEFAULT_BASE } from './create-data';
+
 figma.showUI(__html__, { width: 450, height: 600 });
 
 interface TokenValue {
@@ -134,6 +136,64 @@ async function processTokens(tokens: Tokens, prefix: string = ''): Promise<{
   return results;
 }
 
+function parseOklch(value: string): { l: number; c: number; h: number } | null {
+  const m = value.match(/^oklch\(\s*([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s*\)$/i);
+  if (!m) return null;
+  return { l: parseFloat(m[1]), c: parseFloat(m[2]), h: parseFloat(m[3]) };
+}
+
+// OKLCH (CSS Color 4) → linear sRGB → sRGB. Algorithm follows the spec
+// (Björn Ottosson's Oklab) — see https://bottosson.github.io/posts/oklab/
+function oklchToRgb(value: string): { r: number; g: number; b: number } | null {
+  const ok = parseOklch(value);
+  if (!ok) return null;
+
+  const hRad = (ok.h * Math.PI) / 180;
+  const a = ok.c * Math.cos(hRad);
+  const b = ok.c * Math.sin(hRad);
+
+  const l_ = ok.l + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = ok.l - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = ok.l - 0.0894841775 * a - 1.2914855480 * b;
+
+  const lc = l_ * l_ * l_;
+  const mc = m_ * m_ * m_;
+  const sc = s_ * s_ * s_;
+
+  let lr = +4.0767416621 * lc - 3.3077115913 * mc + 0.2309699292 * sc;
+  let lg = -1.2684380046 * lc + 2.6097574011 * mc - 0.3413193965 * sc;
+  let lb = -0.0041960863 * lc - 0.7034186147 * mc + 1.7076147010 * sc;
+
+  const toSrgb = (n: number) => {
+    const x = Math.max(0, Math.min(1, n));
+    return x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055;
+  };
+
+  return { r: toSrgb(lr), g: toSrgb(lg), b: toSrgb(lb) };
+}
+
+function colorValueToRgb(value: string): { r: number; g: number; b: number } | null {
+  if (!value) return null;
+  if (value.startsWith('oklch(')) return oklchToRgb(value);
+  if (value.startsWith('#')) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(value);
+    if (!m) return null;
+    return { r: parseInt(m[1], 16) / 255, g: parseInt(m[2], 16) / 255, b: parseInt(m[3], 16) / 255 };
+  }
+  return null;
+}
+
+function buildThemeBlock(themeName: string, mode: 'light' | 'dark'): Record<string, string> {
+  const theme = THEMES.find(t => t.name === themeName);
+  if (!theme) return {};
+  const isBase = BASE_THEMES.indexOf(themeName) !== -1;
+  if (isBase) return theme.cssVars[mode] || {};
+  // Overlay theme — merge over the default base
+  const base = THEMES.find(t => t.name === DEFAULT_BASE);
+  const baseBlock = (base && base.cssVars[mode]) || {};
+  return Object.assign({}, baseBlock, theme.cssVars[mode] || {});
+}
+
 function lineHeightToString(lh: LineHeight): string {
   if (lh.unit === 'AUTO') return 'AUTO';
   return lh.unit === 'PERCENT' ? `${lh.value}%` : `${lh.value}px`;
@@ -226,6 +286,211 @@ function applyTypography(style: TextStyle, val: any): void {
   if (val.textDecoration) style.textDecoration = val.textDecoration as TextDecoration;
 }
 
+interface RebindStats {
+  variables: number;
+  nodes: number;
+  paintStyles: number;
+  effectStyles: number;
+  textStyles: number;
+}
+
+function remapPaintArray(
+  paints: ReadonlyArray<Paint>,
+  remapping: Map<string, Variable>
+): { paints: Paint[]; changed: boolean } {
+  let changed = false;
+  const next = paints.map((paint) => {
+    const bv: any = (paint as any).boundVariables;
+    if (!bv) return paint;
+    let p = paint;
+    if (bv.color && bv.color.id) {
+      const nv = remapping.get(bv.color.id);
+      if (nv) {
+        p = figma.variables.setBoundVariableForPaint(p as SolidPaint, 'color', nv);
+        changed = true;
+      }
+    }
+    return p;
+  });
+  return { paints: next, changed };
+}
+
+function remapEffectArray(
+  effects: ReadonlyArray<Effect>,
+  remapping: Map<string, Variable>
+): { effects: Effect[]; changed: boolean } {
+  const fields: VariableBindableEffectField[] = ['color', 'radius', 'spread', 'offsetX', 'offsetY'];
+  let changed = false;
+  const next = effects.map((effect) => {
+    const bv: any = (effect as any).boundVariables;
+    if (!bv) return effect;
+    let e = effect;
+    for (const field of fields) {
+      const ref = bv[field];
+      if (ref && ref.id) {
+        const nv = remapping.get(ref.id);
+        if (nv) {
+          e = figma.variables.setBoundVariableForEffect(e, field, nv);
+          changed = true;
+        }
+      }
+    }
+    return e;
+  });
+  return { effects: next, changed };
+}
+
+function remapGridArray(
+  grids: ReadonlyArray<LayoutGrid>,
+  remapping: Map<string, Variable>
+): { grids: LayoutGrid[]; changed: boolean } {
+  const fields: VariableBindableLayoutGridField[] = ['sectionSize', 'count', 'offset', 'gutterSize'];
+  let changed = false;
+  const next = grids.map((grid) => {
+    const bv: any = (grid as any).boundVariables;
+    if (!bv) return grid;
+    let g = grid;
+    for (const field of fields) {
+      const ref = bv[field];
+      if (ref && ref.id) {
+        const nv = remapping.get(ref.id);
+        if (nv) {
+          g = figma.variables.setBoundVariableForLayoutGrid(g, field, nv);
+          changed = true;
+        }
+      }
+    }
+    return g;
+  });
+  return { grids: next, changed };
+}
+
+function rebindScalarBindings(target: any, remapping: Map<string, Variable>): boolean {
+  if (!target || !target.boundVariables) return false;
+  let changed = false;
+  for (const prop of Object.keys(target.boundVariables)) {
+    const binding = target.boundVariables[prop];
+    if (!binding) continue;
+    // Skip array-shaped (fills/strokes/effects/layoutGrids) — handled by the paint/effect/grid remap
+    if (Array.isArray(binding)) continue;
+    if (binding.type === 'VARIABLE_ALIAS' && binding.id) {
+      const nv = remapping.get(binding.id);
+      if (nv && typeof target.setBoundVariable === 'function') {
+        try {
+          target.setBoundVariable(prop as VariableBindableNodeField, nv);
+          changed = true;
+        } catch (e) {
+          // Some props are not rebindable on every node type — ignore
+        }
+      }
+    }
+  }
+  return changed;
+}
+
+function rebindNode(node: BaseNode, remapping: Map<string, Variable>): boolean {
+  let changed = false;
+
+  if (rebindScalarBindings(node, remapping)) changed = true;
+
+  if ('fills' in node) {
+    const fills = (node as any).fills;
+    if (Array.isArray(fills)) {
+      const r = remapPaintArray(fills as Paint[], remapping);
+      if (r.changed) { (node as any).fills = r.paints; changed = true; }
+    }
+  }
+  if ('strokes' in node) {
+    const strokes = (node as any).strokes;
+    if (Array.isArray(strokes)) {
+      const r = remapPaintArray(strokes as Paint[], remapping);
+      if (r.changed) { (node as any).strokes = r.paints; changed = true; }
+    }
+  }
+  if ('effects' in node) {
+    const effects = (node as any).effects;
+    if (Array.isArray(effects)) {
+      const r = remapEffectArray(effects as Effect[], remapping);
+      if (r.changed) { (node as any).effects = r.effects; changed = true; }
+    }
+  }
+  if ('layoutGrids' in node) {
+    const grids = (node as any).layoutGrids;
+    if (Array.isArray(grids)) {
+      const r = remapGridArray(grids as LayoutGrid[], remapping);
+      if (r.changed) { (node as any).layoutGrids = r.grids; changed = true; }
+    }
+  }
+
+  // Per-segment fills on text nodes
+  if (node.type === 'TEXT') {
+    const t = node as TextNode;
+    try {
+      const segments = t.getStyledTextSegments(['fills']);
+      for (const seg of segments) {
+        const r = remapPaintArray(seg.fills as Paint[], remapping);
+        if (r.changed) { t.setRangeFills(seg.start, seg.end, r.paints); changed = true; }
+      }
+    } catch (e) {
+      // Font not loaded or other text-API hiccup — skip silently
+    }
+  }
+
+  return changed;
+}
+
+async function rebindAllReferences(remapping: Map<string, Variable>): Promise<RebindStats> {
+  const stats: RebindStats = { variables: 0, nodes: 0, paintStyles: 0, effectStyles: 0, textStyles: 0 };
+  if (remapping.size === 0) return stats;
+
+  // 1. Other variables' aliases
+  const collections = await figma.variables.getLocalVariableCollectionsAsync();
+  for (const col of collections) {
+    for (const vId of col.variableIds) {
+      const v = await figma.variables.getVariableByIdAsync(vId);
+      if (!v) continue;
+      const modeIds = Object.keys(v.valuesByMode);
+      for (const modeId of modeIds) {
+        const val: any = v.valuesByMode[modeId];
+        if (val && typeof val === 'object' && val.type === 'VARIABLE_ALIAS' && val.id) {
+          const nv = remapping.get(val.id);
+          if (nv) {
+            v.setValueForMode(modeId, { type: 'VARIABLE_ALIAS', id: nv.id });
+            stats.variables++;
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Walk every node on every page
+  const visit = (node: BaseNode) => {
+    if (rebindNode(node, remapping)) stats.nodes++;
+    if ('children' in node) {
+      for (const child of (node as ChildrenMixin).children) visit(child);
+    }
+  };
+  for (const page of figma.root.children) visit(page);
+
+  // 3. Local styles
+  const paintStyles = await figma.getLocalPaintStylesAsync();
+  for (const style of paintStyles) {
+    const r = remapPaintArray(style.paints, remapping);
+    if (r.changed) { style.paints = r.paints; stats.paintStyles++; }
+  }
+  const effectStyles = await figma.getLocalEffectStylesAsync();
+  for (const style of effectStyles) {
+    const r = remapEffectArray(style.effects, remapping);
+    if (r.changed) { style.effects = r.effects; stats.effectStyles++; }
+  }
+  const textStyles = await figma.getLocalTextStylesAsync();
+  for (const style of textStyles) {
+    if (rebindScalarBindings(style, remapping)) stats.textStyles++;
+  }
+
+  return stats;
+}
+
 async function getFigmaVariables() {
   const collections = await figma.variables.getLocalVariableCollectionsAsync();
   const variables: any[] = [];
@@ -297,8 +562,11 @@ figma.ui.onmessage = async (msg) => {
 
   if (msg.type === 'export-tokens') {
     try {
-      const variables = await getFigmaVariables();
-      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const allCollections = await figma.variables.getLocalVariableCollectionsAsync();
+      const filterIds: string[] | undefined = Array.isArray(msg.collectionIds) ? msg.collectionIds : undefined;
+      const collections = filterIds && filterIds.length > 0
+        ? allCollections.filter(c => filterIds.indexOf(c.id) !== -1)
+        : allCollections;
 
       const exportData: any = {};
 
@@ -456,26 +724,154 @@ figma.ui.onmessage = async (msg) => {
       const targetCollection = collections.find(c => c.id === msg.targetCollectionId);
       if (!targetCollection) throw new Error('Target collection not found');
 
-      const targetMode = targetCollection.modes[0].modeId;
       const variableIds: string[] = Array.isArray(msg.variableIds) ? msg.variableIds : [msg.variableIds];
-      let movedCount = 0;
+
+      // Step 1: Create new variables in target, preserving metadata and per-mode values.
+      // Build a remap of oldId → newVar so we can rebind every reference in step 2.
+      const remapping = new Map<string, Variable>();
+      const oldVariables: Variable[] = [];
 
       for (const variableId of variableIds) {
-        const variable = figma.variables.getVariableById(variableId);
+        const variable = await figma.variables.getVariableByIdAsync(variableId);
         if (!variable) continue;
         const sourceCollection = collections.find(c => c.variableIds.includes(variableId));
         if (!sourceCollection || sourceCollection.id === targetCollection.id) continue;
 
-        const sourceMode = sourceCollection.modes[0].modeId;
-        const value = variable.valuesByMode[sourceMode];
         const newVar = figma.variables.createVariable(variable.name, targetCollection, variable.resolvedType);
-        newVar.setValueForMode(targetMode, value);
-        variable.remove();
-        movedCount++;
+
+        try { if (variable.description) newVar.description = variable.description; } catch {}
+        try { newVar.hiddenFromPublishing = variable.hiddenFromPublishing; } catch {}
+        try { newVar.scopes = variable.scopes; } catch {}
+        try {
+          const cs: any = (variable as any).codeSyntax;
+          if (cs) {
+            if (cs.WEB) newVar.setVariableCodeSyntax('WEB', cs.WEB);
+            if (cs.ANDROID) newVar.setVariableCodeSyntax('ANDROID', cs.ANDROID);
+            if (cs.iOS) newVar.setVariableCodeSyntax('iOS', cs.iOS);
+          }
+        } catch {}
+
+        // Copy each source-mode value to the target mode with the same name; fall back to default.
+        for (const sMode of sourceCollection.modes) {
+          const val = variable.valuesByMode[sMode.modeId];
+          if (val === undefined) continue;
+          const match = targetCollection.modes.find(m => m.name.toLowerCase() === sMode.name.toLowerCase());
+          const targetModeId = (match || targetCollection.modes[0]).modeId;
+          try { newVar.setValueForMode(targetModeId, val); } catch {}
+        }
+
+        remapping.set(variable.id, newVar);
+        oldVariables.push(variable);
       }
 
-      figma.notify(`Moved ${movedCount} variable${movedCount !== 1 ? 's' : ''} to "${targetCollection.name}"`);
-      figma.ui.postMessage({ type: 'variables-moved' });
+      if (remapping.size === 0) {
+        figma.ui.postMessage({ type: 'variables-moved', moved: 0, rebound: null });
+        return;
+      }
+
+      figma.notify('Rebinding references…');
+
+      // Step 2: Walk the document and rebind every reference from old ids to new variables.
+      const rebound = await rebindAllReferences(remapping);
+
+      // Step 3: Now safe to remove the originals.
+      for (const v of oldVariables) {
+        try { v.remove(); } catch {}
+      }
+
+      const movedCount = remapping.size;
+      figma.notify(`Moved ${movedCount} variable${movedCount !== 1 ? 's' : ''} — rebound ${rebound.nodes} node${rebound.nodes !== 1 ? 's' : ''}, ${rebound.variables} alias${rebound.variables !== 1 ? 'es' : ''}`);
+      figma.ui.postMessage({ type: 'variables-moved', moved: movedCount, rebound });
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
+    }
+  }
+
+  if (msg.type === 'get-create-data') {
+    figma.ui.postMessage({
+      type: 'create-data',
+      styles: STYLES,
+      themes: THEMES.map(t => ({ name: t.name, title: t.title, isBase: BASE_THEMES.indexOf(t.name) !== -1 }))
+    });
+  }
+
+  if (msg.type === 'apply-theme') {
+    try {
+      const themeName: string = msg.themeName;
+      const lightBlock = buildThemeBlock(themeName, 'light');
+      const darkBlock = buildThemeBlock(themeName, 'dark');
+
+      if (Object.keys(lightBlock).length === 0) {
+        throw new Error('Theme "' + themeName + '" not found');
+      }
+
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      let updated = 0;
+      const unmatched: string[] = [];
+      const tokenNames = Object.keys(lightBlock);
+
+      for (const collection of collections) {
+        // Determine which mode receives light vs dark values
+        const lightModes: string[] = [];
+        const darkModes: string[] = [];
+        const otherModes: string[] = [];
+        for (const mode of collection.modes) {
+          const n = mode.name.toLowerCase();
+          if (n.indexOf('dark') !== -1) darkModes.push(mode.modeId);
+          else if (n.indexOf('light') !== -1) lightModes.push(mode.modeId);
+          else otherModes.push(mode.modeId);
+        }
+        // If there's no explicit light mode, default mode receives light values
+        if (lightModes.length === 0 && otherModes.length > 0) {
+          lightModes.push(otherModes[0]);
+        }
+
+        // Build a name → variable map for fast lookups (case-insensitive, last-segment match)
+        const colorVars: { variable: Variable; key: string }[] = [];
+        for (const id of collection.variableIds) {
+          const v = await figma.variables.getVariableByIdAsync(id);
+          if (!v || v.resolvedType !== 'COLOR') continue;
+          const last = v.name.split('/').pop() || v.name;
+          colorVars.push({ variable: v, key: last.toLowerCase() });
+        }
+
+        for (const tokenName of tokenNames) {
+          const matching = colorVars.filter(cv => cv.key === tokenName.toLowerCase());
+          if (matching.length === 0) continue;
+
+          const lightRgb = colorValueToRgb(lightBlock[tokenName]);
+          const darkRgb = colorValueToRgb(darkBlock[tokenName] || lightBlock[tokenName]);
+
+          for (const { variable } of matching) {
+            if (lightRgb) {
+              for (const modeId of lightModes) variable.setValueForMode(modeId, lightRgb);
+            }
+            if (darkRgb) {
+              for (const modeId of darkModes) variable.setValueForMode(modeId, darkRgb);
+            }
+            updated++;
+          }
+        }
+      }
+
+      // Report which token names had no Figma variable to update
+      for (const tokenName of tokenNames) {
+        if (!colorValueToRgb(lightBlock[tokenName])) continue; // skip non-color (e.g. "radius")
+        let found = false;
+        for (const c of collections) {
+          for (const id of c.variableIds) {
+            const v = await figma.variables.getVariableByIdAsync(id);
+            if (v && v.resolvedType === 'COLOR' && (v.name.split('/').pop() || v.name).toLowerCase() === tokenName.toLowerCase()) {
+              found = true; break;
+            }
+          }
+          if (found) break;
+        }
+        if (!found) unmatched.push(tokenName);
+      }
+
+      figma.notify('Applied "' + themeName + '" — ' + updated + ' variable' + (updated !== 1 ? 's' : '') + ' updated');
+      figma.ui.postMessage({ type: 'apply-theme-complete', updated, unmatched });
     } catch (error) {
       figma.ui.postMessage({ type: 'error', error: String(error) });
     }
