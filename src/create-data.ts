@@ -21,6 +21,22 @@ export const BASE_THEMES: string[] = ['neutral','stone','zinc','mauve','olive','
 // Default base used when an overlay-only theme (11 keys) is selected.
 export const DEFAULT_BASE = 'neutral';
 
+// Per-style radius anchor (px = lg value, assuming 1rem = 16px).
+// Source: bejamas /create bundle. The radius enum is mt = { default:"0.625rem", none:"0",
+// small:"0.45rem", medium:"0.625rem", large:"0.875rem" }, and yt maps every style to one
+// of those enums. In bejamas only Lyra/Maia *force* a radius, but in this plugin we apply
+// the style's anchor unconditionally so that picking Juno actively resets the scale to
+// the default 10px instead of silently doing nothing.
+export const STYLE_RADIUS: Record<string, number> = {
+  juno: 10,
+  vega: 10,
+  nova: 10,
+  lyra: 0,
+  maia: 14,
+  mira: 10,
+  luma: 10,
+};
+
 export const STYLES: StyleData[] = [
   {
     "name": "juno",
