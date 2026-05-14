@@ -294,12 +294,25 @@
       font-weight: 600;
       font-size: 12px;
       color: var(--text-primary);
-      cursor: default;
+      cursor: pointer;
       transition: all 0.2s;
     }
     .collection-header.drag-over {
       border-color: var(--accent);
       background: var(--accent-bg);
+    }
+    .collection-chevron {
+      display: inline-block;
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-right: 6px;
+      transition: transform 0.15s;
+      width: 10px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .collection-block.open .collection-chevron {
+      transform: rotate(90deg);
     }
     .variable-row {
       display: flex;
@@ -408,6 +421,47 @@
       color: var(--text-primary);
       margin-bottom: 6px;
       display: block;
+    }
+    .create-tile {
+      display: block;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .create-tile:hover {
+      border-color: var(--accent);
+    }
+    .create-tile-active {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+    }
+    .create-swatch {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .create-swatch:hover {
+      border-color: var(--accent);
+    }
+    .create-swatch-active {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+    }
+    .create-swatch-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      border: 1px solid rgba(0,0,0,0.1);
+      flex-shrink: 0;
     }
   </style>
 </head>
@@ -533,30 +587,31 @@
 
           <button class="action-button" onclick="showCollectionManager()">
             <span class="action-icon">🗂️</span>
-            <span>Collection Manager</span>
+            <span>Tokens &amp; Variables</span>
             <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
           </button>
 
-          <button class="action-button" onclick="showTypographyManager()">
-            <span class="action-icon">🔤</span>
-            <span>Typography Manager</span>
+          <button class="action-button" onclick="showCreateScreen()">
+            <span class="action-icon">✨</span>
+            <span>Create</span>
             <span style="margin-left: auto; background: #434343; color: #BBBBBB; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">NEW</span>
           </button>
         </div>
       `;
     }
 
-    function showUploadScreen() {
+    function showUploadScreen(backTarget) {
       jsonTokens = null;
       figmaVariables = [];
       fileName = '';
 
       const hasGitHubConfig = githubConfig && githubConfig.token && githubConfig.owner && githubConfig.repo && githubConfig.path;
+      const backFn = backTarget === 'collections' ? 'showCollectionManager()' : 'showDashboard()';
 
       document.getElementById('root').innerHTML = `
         <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
           <div class="screen-header">
-            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div class="back-icon" onclick="${backFn}">←</div>
             <div>
               <p class="screen-title">Import JSON</p>
               <p class="screen-subtitle">Upload a token file to import</p>
@@ -770,13 +825,19 @@
           <div class="screen-header">
             <div class="back-icon" onclick="showDashboard()">←</div>
             <div>
-              <p class="screen-title">Collection Manager <span style="background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; vertical-align: middle;">BETA</span></p>
+              <p class="screen-title">Tokens &amp; Variables <span style="background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; vertical-align: middle;">BETA</span></p>
               <p class="screen-subtitle">Select or drag variables to move between collections</p>
             </div>
           </div>
 
-          <div id="collections-list" style="flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 80px;">
+          <div id="collections-list" style="flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
             <div style="text-align: center; padding: 40px; color: var(--text-muted); font-size: 12px;">Loading collections...</div>
+          </div>
+
+          <!-- Sticky bottom action bar (always visible) -->
+          <div id="tv-action-bar" style="background-color: var(--bg); padding: 12px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <button class="button-secondary" id="tv-export-btn" style="margin-top: 0;" onclick="exportFromSelection()">📤 Export JSON</button>
+            <button class="button-primary" style="margin-top: 0;" onclick="showUploadScreen('collections')">📥 Import JSON</button>
           </div>
 
           <!-- Sticky action bar, shown when items are selected -->
@@ -799,7 +860,8 @@
       if (!list) return;
 
       if (!collections || collections.length === 0) {
-        list.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted); font-size: 12px;">No collections found</div>';
+        list.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted); font-size: 12px;">No variable collections found</div>' +
+          typographyBlockHtml();
         return;
       }
 
@@ -826,13 +888,15 @@
         }).join('');
 
         return `
-          <div class="collection-block" style="margin-bottom: 12px;">
+          <div class="collection-block" data-collection-id="${col.id}" style="margin-bottom: 12px;">
             <div class="collection-header"
               data-collection-id="${col.id}"
+              onclick="toggleCollection(event, '${col.id}')"
               ondragover="handleColDragOver(event, this)"
               ondragleave="handleColDragLeave(this)"
               ondrop="handleColDrop(event, '${col.id}', this)"
             >
+              <span class="collection-chevron">▸</span>
               <input type="checkbox" class="col-select-all" data-collection-id="${col.id}"
                 style="margin-right: 8px; cursor: pointer; width: 13px; height: 13px; accent-color: #1E90FF;"
                 onclick="handleSelectAll(event, '${col.id}')" />
@@ -840,10 +904,10 @@
               <span>${col.name}</span>
               <span class="col-count" style="margin-left: auto; color: var(--text-muted); font-weight: 400;">${col.variables.length} var${col.variables.length !== 1 ? 's' : ''}</span>
             </div>
-            <div class="variables-container" data-collection-id="${col.id}">${vars}</div>
+            <div class="variables-container" data-collection-id="${col.id}" style="display: none;">${vars}</div>
           </div>
         `;
-      }).join('');
+      }).join('') + typographyBlockHtml();
 
       // Attach drag events
       list.querySelectorAll('.variable-row').forEach(function(row) {
@@ -867,6 +931,24 @@
       });
     }
 
+    function toggleCollection(e, colId) {
+      // Don't toggle when the click target is the select-all checkbox
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.classList.contains('col-select-all'))) return;
+      const block = document.querySelector('.collection-block[data-collection-id="' + colId + '"]');
+      const container = document.querySelector('.variables-container[data-collection-id="' + colId + '"]');
+      if (!block || !container) return;
+      const isOpen = block.classList.toggle('open');
+      container.style.display = isOpen ? '' : 'none';
+    }
+
+    function openCollection(colId) {
+      const block = document.querySelector('.collection-block[data-collection-id="' + colId + '"]');
+      const container = document.querySelector('.variables-container[data-collection-id="' + colId + '"]');
+      if (!block || !container) return;
+      block.classList.add('open');
+      container.style.display = '';
+    }
+
     function getCheckedIds() {
       return Array.from(document.querySelectorAll('.var-checkbox:checked')).map(function(cb) {
         return cb.dataset.variableId;
@@ -880,26 +962,178 @@
 
     function handleSelectAll(e, collectionId) {
       e.stopPropagation();
-      const checked = e.target.checked;
-      document.querySelectorAll('.var-checkbox[data-source-collection="' + collectionId + '"]').forEach(function(cb) {
-        cb.checked = checked;
+      // Folder checkbox is independent — it only marks the folder as selected for export.
+      // It no longer cascades to per-variable checkboxes (which drive the Move flow).
+      updateExportButton();
+    }
+
+    function getCheckedFolderIds() {
+      return Array.from(document.querySelectorAll('.col-select-all:checked')).map(function(cb) {
+        return cb.dataset.collectionId;
       });
-      updateSelectionBar();
+    }
+
+    function updateExportButton() {
+      const btn = document.getElementById('tv-export-btn');
+      if (!btn) return;
+      const folderIds = getCheckedFolderIds();
+      const hasTypography = folderIds.indexOf('__typography__') !== -1;
+      const variableCount = folderIds.length - (hasTypography ? 1 : 0);
+
+      btn.disabled = false;
+      btn.style.opacity = '';
+      btn.style.cursor = '';
+
+      // Default (nothing selected) exports both as a zip; same label as the dual-select case
+      if ((hasTypography && variableCount > 0) || folderIds.length === 0) {
+        btn.textContent = '📤 Export files';
+      } else {
+        btn.textContent = '📤 Export JSON';
+      }
+    }
+
+    // ── Minimal zip builder (stored / no compression) ──
+    // Produces a valid .zip from { name, content: string } entries.
+    var _crcTable = null;
+    function _getCrcTable() {
+      if (_crcTable) return _crcTable;
+      _crcTable = new Uint32Array(256);
+      for (var n = 0; n < 256; n++) {
+        var c = n;
+        for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        _crcTable[n] = c >>> 0;
+      }
+      return _crcTable;
+    }
+    function _crc32(bytes) {
+      var table = _getCrcTable();
+      var crc = 0xFFFFFFFF;
+      for (var i = 0; i < bytes.length; i++) crc = table[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+      return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+    function createZip(files) {
+      const encoder = new TextEncoder();
+      const entries = files.map(function(f) {
+        const nameBytes = encoder.encode(f.name);
+        const data = encoder.encode(f.content);
+        return { name: f.name, nameBytes: nameBytes, data: data, crc: _crc32(data) };
+      });
+      const chunks = [];
+      let offset = 0;
+      const centralRecords = [];
+      for (const e of entries) {
+        const headerBuf = new ArrayBuffer(30 + e.nameBytes.length);
+        const v = new DataView(headerBuf);
+        v.setUint32(0, 0x04034b50, true);
+        v.setUint16(4, 20, true);
+        v.setUint16(6, 0, true);
+        v.setUint16(8, 0, true); // store
+        v.setUint16(10, 0, true);
+        v.setUint16(12, 0, true);
+        v.setUint32(14, e.crc, true);
+        v.setUint32(18, e.data.length, true);
+        v.setUint32(22, e.data.length, true);
+        v.setUint16(26, e.nameBytes.length, true);
+        v.setUint16(28, 0, true);
+        const header = new Uint8Array(headerBuf);
+        header.set(e.nameBytes, 30);
+        centralRecords.push({ entry: e, headerOffset: offset });
+        chunks.push(header); offset += header.length;
+        chunks.push(e.data); offset += e.data.length;
+      }
+      const centralStart = offset;
+      for (const c of centralRecords) {
+        const e = c.entry;
+        const buf = new ArrayBuffer(46 + e.nameBytes.length);
+        const v = new DataView(buf);
+        v.setUint32(0, 0x02014b50, true);
+        v.setUint16(4, 20, true);
+        v.setUint16(6, 20, true);
+        v.setUint16(8, 0, true);
+        v.setUint16(10, 0, true);
+        v.setUint16(12, 0, true);
+        v.setUint16(14, 0, true);
+        v.setUint32(16, e.crc, true);
+        v.setUint32(20, e.data.length, true);
+        v.setUint32(24, e.data.length, true);
+        v.setUint16(28, e.nameBytes.length, true);
+        v.setUint16(30, 0, true);
+        v.setUint16(32, 0, true);
+        v.setUint16(34, 0, true);
+        v.setUint16(36, 0, true);
+        v.setUint32(38, 0, true);
+        v.setUint32(42, c.headerOffset, true);
+        const arr = new Uint8Array(buf);
+        arr.set(e.nameBytes, 46);
+        chunks.push(arr); offset += arr.length;
+      }
+      const centralSize = offset - centralStart;
+      const eocdBuf = new ArrayBuffer(22);
+      const ev = new DataView(eocdBuf);
+      ev.setUint32(0, 0x06054b50, true);
+      ev.setUint16(4, 0, true);
+      ev.setUint16(6, 0, true);
+      ev.setUint16(8, entries.length, true);
+      ev.setUint16(10, entries.length, true);
+      ev.setUint32(12, centralSize, true);
+      ev.setUint32(16, centralStart, true);
+      ev.setUint16(20, 0, true);
+      chunks.push(new Uint8Array(eocdBuf));
+      const total = chunks.reduce(function(s, c) { return s + c.length; }, 0);
+      const out = new Uint8Array(total);
+      let p = 0;
+      for (const c of chunks) { out.set(c, p); p += c.length; }
+      return out;
+    }
+
+    // Holds buffered exports when we need to bundle into a zip.
+    var _zipBuffer = null;
+
+    function exportFromSelection() {
+      const folderIds = getCheckedFolderIds();
+      const hasTypography = folderIds.indexOf('__typography__') !== -1;
+      const variableCollectionIds = folderIds.filter(function(id) { return id !== '__typography__'; });
+      // Default (nothing selected) = export everything
+      const exportTypography = hasTypography || folderIds.length === 0;
+      const exportVariables = folderIds.length === 0 || variableCollectionIds.length > 0;
+
+      if (exportVariables && exportTypography) {
+        // Need both — collect into a zip and download once
+        _zipBuffer = { variables: null, typography: null };
+        const tokensPayload = { type: 'export-tokens' };
+        if (variableCollectionIds.length > 0) tokensPayload.collectionIds = variableCollectionIds;
+        parent.postMessage({ pluginMessage: tokensPayload }, '*');
+        parent.postMessage({ pluginMessage: { type: 'export-text-styles' } }, '*');
+        return;
+      }
+
+      if (exportTypography) {
+        parent.postMessage({ pluginMessage: { type: 'export-text-styles' } }, '*');
+        return;
+      }
+
+      // Variables only (or default = all)
+      const payload = { type: 'export-tokens' };
+      if (variableCollectionIds.length > 0) payload.collectionIds = variableCollectionIds;
+      parent.postMessage({ pluginMessage: payload }, '*');
     }
 
     function updateSelectionBar() {
       const checked = getCheckedIds();
       const bar = document.getElementById('selection-bar');
+      const actionBar = document.getElementById('tv-action-bar');
       const countEl = document.getElementById('selection-count');
       const select = document.getElementById('target-collection-select');
       if (!bar || !countEl || !select) return;
 
       if (checked.length === 0) {
         bar.style.display = 'none';
+        if (actionBar) actionBar.style.display = 'grid';
         return;
       }
 
       bar.style.display = 'flex';
+      if (actionBar) actionBar.style.display = 'none';
       countEl.textContent = checked.length + ' selected';
 
       // Populate collection options (exclude collections that all selected vars already belong to)
@@ -910,10 +1144,12 @@
     }
 
     function clearSelection() {
+      // Only clear per-variable (Move-mode) selection. Folder-level export selection is independent.
       document.querySelectorAll('.var-checkbox').forEach(function(cb) { cb.checked = false; });
-      document.querySelectorAll('.col-select-all').forEach(function(cb) { cb.checked = false; });
       const bar = document.getElementById('selection-bar');
+      const actionBar = document.getElementById('tv-action-bar');
       if (bar) bar.style.display = 'none';
+      if (actionBar) actionBar.style.display = 'grid';
     }
 
     function moveSelected() {
@@ -935,6 +1171,7 @@
       });
       updateCounts();
       clearSelection();
+      openCollection(targetCollectionId);
 
       parent.postMessage({ pluginMessage: { type: 'move-variables', variableIds, targetCollectionId } }, '*');
     }
@@ -975,76 +1212,179 @@
       });
       updateCounts();
       clearSelection();
+      openCollection(targetCollectionId);
 
       parent.postMessage({ pluginMessage: { type: 'move-variables', variableIds, targetCollectionId } }, '*');
     }
 
-    var _typographyTokens = null;
+    var _createData = null;
+    var _selectedStyle = 'juno';
+    var _selectedTheme = 'bejamas-blue';
 
-    function showTypographyManager() {
-      _typographyTokens = null;
+    function showCreateScreen() {
       document.getElementById('root').innerHTML = `
         <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
           <div class="screen-header">
             <div class="back-icon" onclick="showDashboard()">←</div>
             <div>
-              <p class="screen-title">Typography Manager</p>
-              <p class="screen-subtitle">Local text styles in this file</p>
+              <p class="screen-title">Create</p>
+              <p class="screen-subtitle">Apply a bejamas/ui style + theme to your variables</p>
             </div>
           </div>
 
-          <div style="flex: 1; overflow: auto; min-height: 0; margin-bottom: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
-            <pre id="typography-json" style="margin: 0; font-family: 'SF Mono', Monaco, 'Courier New', monospace; font-size: 11px; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; line-height: 1.5;">Loading...</pre>
+          <div id="create-body" style="flex: 1; overflow-y: auto; min-height: 0;">
+            <div style="text-align: center; padding: 40px; color: var(--text-muted); font-size: 12px;">Loading…</div>
           </div>
 
-          <input type="file" accept=".json" id="typography-file-input" style="display: none;" onchange="handleTypographyImportFile(event)" />
-
-          <div style="background-color: var(--bg); padding: 16px 0 12px 0; display: flex; gap: 8px;">
-            <button class="button-secondary" style="margin-top: 0; flex: 1;" onclick="document.getElementById('typography-file-input').click()">📥 Import</button>
-            <button class="button-primary" style="margin-top: 0; flex: 1;" id="typography-export-btn" onclick="exportTypography()">📤 Export</button>
+          <div style="background-color: var(--bg); padding: 16px 0 12px 0;">
+            <button class="button-primary" id="create-apply-btn" onclick="applyCreateSelection()">Apply theme</button>
           </div>
         </div>
       `;
-      parent.postMessage({ pluginMessage: { type: 'get-text-styles' } }, '*');
+      if (_createData) {
+        renderCreateBody();
+      } else {
+        parent.postMessage({ pluginMessage: { type: 'get-create-data' } }, '*');
+      }
+    }
+
+    function renderCreateBody() {
+      const body = document.getElementById('create-body');
+      if (!body || !_createData) return;
+
+      const styleOptions = _createData.styles.map(function(s) {
+        const checked = s.name === _selectedStyle;
+        return `
+          <label class="create-tile ${checked ? 'create-tile-active' : ''}" onclick="selectStyle('${s.name}')">
+            <div style="font-weight: 600; font-size: 12px; color: var(--text-primary);">${s.title}</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">${s.description}</div>
+          </label>
+        `;
+      }).join('');
+
+      // Group themes: base palettes first, then accent themes
+      const baseThemes = _createData.themes.filter(function(t) { return t.isBase; });
+      const accentThemes = _createData.themes.filter(function(t) { return !t.isBase; });
+
+      function themeSwatch(t) {
+        const checked = t.name === _selectedTheme;
+        return `
+          <label class="create-swatch ${checked ? 'create-swatch-active' : ''}" onclick="selectTheme('${t.name}')" title="${t.title}">
+            <span class="create-swatch-dot" data-theme="${t.name}"></span>
+            <span style="font-size: 11px; color: var(--text-primary);">${t.title}</span>
+          </label>
+        `;
+      }
+
+      body.innerHTML = `
+        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Style</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px;">
+          ${styleOptions}
+        </div>
+
+        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Theme · Base palettes</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 16px;">
+          ${baseThemes.map(themeSwatch).join('')}
+        </div>
+
+        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Theme · Accents</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px;">
+          ${accentThemes.map(themeSwatch).join('')}
+        </div>
+      `;
+
+      paintSwatches();
+    }
+
+    // Use a hidden div to convert oklch() (which the WebView supports) into rgb for the dot color
+    function paintSwatches() {
+      document.querySelectorAll('.create-swatch-dot').forEach(function(el) {
+        const name = el.getAttribute('data-theme');
+        const t = _createData.themes.find(function(x) { return x.name === name; });
+        if (!t) return;
+        // The themes list sent from backend is name+title only. We rely on a small swatch-color map.
+        const color = _swatchColors[name] || '#999';
+        el.style.background = color;
+      });
+    }
+
+    // Static accent swatches — used purely for the picker preview.
+    var _swatchColors = {
+      neutral: '#525252', stone: '#78716c', zinc: '#71717a',
+      mauve: '#7e7588', olive: '#6b7256', mist: '#6b7d8a', taupe: '#8a7868',
+      amber: '#f59e0b', blue: '#3b82f6', cyan: '#06b6d4', emerald: '#10b981',
+      fuchsia: '#d946ef', green: '#22c55e', indigo: '#6366f1', lime: '#84cc16',
+      orange: '#f97316', pink: '#ec4899', purple: '#a855f7', red: '#ef4444',
+      rose: '#f43f5e', sky: '#0ea5e9', teal: '#14b8a6', violet: '#8b5cf6',
+      yellow: '#eab308',
+      'bejamas-blue': '#1146ff', 'bejamas-neon-yellow': '#eaff00',
+      'bejamas-apple': '#7ad96b', 'bejamas-orange': '#ff7849',
+      'bejamas-sunflower': '#ffc83d', 'bejamas-violet': '#a259ff',
+      'bejamas-turquoise': '#3dd6c4', 'bejamas-magenta': '#ff3dab'
+    };
+
+    function selectStyle(name) {
+      _selectedStyle = name;
+      renderCreateBody();
+    }
+
+    function selectTheme(name) {
+      _selectedTheme = name;
+      renderCreateBody();
+    }
+
+    function applyCreateSelection() {
+      const btn = document.getElementById('create-apply-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+      parent.postMessage({
+        pluginMessage: { type: 'apply-theme', themeName: _selectedTheme, styleName: _selectedStyle }
+      }, '*');
+    }
+
+    var _typographyTokens = null;
+
+    function typographyBlockHtml() {
+      return `
+        <div class="collection-block" data-collection-id="__typography__" style="margin-bottom: 12px;">
+          <div class="collection-header" data-collection-id="__typography__" onclick="toggleTypographyBlock(event)">
+            <span class="collection-chevron">▸</span>
+            <input type="checkbox" class="col-select-all" data-collection-id="__typography__"
+              style="margin-right: 8px; cursor: pointer; width: 13px; height: 13px; accent-color: #1E90FF;"
+              onclick="handleSelectAll(event, '__typography__')" />
+            <span style="margin-right: 8px;">🔤</span>
+            <span>Typography</span>
+            <span class="col-count" id="typography-count" style="margin-left: auto; color: var(--text-muted); font-weight: 400;">text styles</span>
+          </div>
+          <div class="variables-container" data-collection-id="__typography__" style="display: none; padding: 12px 8px;">
+            <pre id="typography-json" style="margin: 0; font-family: 'SF Mono', Monaco, 'Courier New', monospace; font-size: 11px; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; line-height: 1.5; max-height: 320px; overflow: auto; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;">Open to load…</pre>
+          </div>
+        </div>
+      `;
+    }
+
+    function toggleTypographyBlock(e) {
+      toggleCollection(e, '__typography__');
+      const block = document.querySelector('.collection-block[data-collection-id="__typography__"]');
+      if (!block || !block.classList.contains('open')) return;
+      if (_typographyTokens === null) {
+        parent.postMessage({ pluginMessage: { type: 'get-text-styles' } }, '*');
+      } else {
+        renderTypography(_typographyTokens);
+      }
     }
 
     function renderTypography(tokens) {
       _typographyTokens = tokens;
       const el = document.getElementById('typography-json');
-      const exportBtn = document.getElementById('typography-export-btn');
+      const countEl = document.getElementById('typography-count');
       if (!el) return;
-      const isEmpty = !tokens || Object.keys(tokens).length === 0;
-      if (isEmpty) {
+      const count = tokens ? Object.keys(tokens).length : 0;
+      if (countEl) countEl.textContent = count + ' style' + (count !== 1 ? 's' : '');
+      if (count === 0) {
         el.textContent = 'No local text styles found in this file.';
-        if (exportBtn) { exportBtn.disabled = true; exportBtn.style.opacity = '0.5'; exportBtn.style.cursor = 'not-allowed'; }
       } else {
         el.textContent = JSON.stringify(tokens, null, 2);
-        if (exportBtn) { exportBtn.disabled = false; exportBtn.style.opacity = ''; exportBtn.style.cursor = ''; }
       }
-    }
-
-    function exportTypography() {
-      if (!_typographyTokens || Object.keys(_typographyTokens).length === 0) {
-        alert('No text styles to export.');
-        return;
-      }
-      parent.postMessage({ pluginMessage: { type: 'export-text-styles' } }, '*');
-    }
-
-    function handleTypographyImportFile(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function(ev) {
-        try {
-          const json = JSON.parse(ev.target.result);
-          parent.postMessage({ pluginMessage: { type: 'import-text-styles', tokens: json } }, '*');
-        } catch (err) {
-          alert('Invalid JSON: ' + err);
-        }
-      };
-      reader.readAsText(file);
-      e.target.value = '';
     }
 
     function showGitHubSettings() {
@@ -1480,6 +1820,19 @@
         // No-op: UI was already updated optimistically
       } else if (msg.type === 'tokens-ready-for-push') {
         pushToGitHub(msg.json);
+      } else if (msg.type === 'create-data') {
+        _createData = { styles: msg.styles, themes: msg.themes };
+        renderCreateBody();
+      } else if (msg.type === 'apply-theme-complete') {
+        const btn = document.getElementById('create-apply-btn');
+        if (btn) { btn.disabled = false; btn.textContent = 'Apply theme'; }
+        const lines = ['Updated ' + msg.updated + ' variable' + (msg.updated !== 1 ? 's' : '') + '.'];
+        if (msg.unmatched && msg.unmatched.length) {
+          lines.push('');
+          lines.push('No matching variable found for: ' + msg.unmatched.slice(0, 8).join(', ') +
+            (msg.unmatched.length > 8 ? ' (+' + (msg.unmatched.length - 8) + ' more)' : ''));
+        }
+        alert(lines.join('\n'));
       } else if (msg.type === 'text-styles-data') {
         renderTypography(msg.tokens);
       } else if (msg.type === 'typography-import-complete') {
@@ -1492,6 +1845,27 @@
           (r.errors && r.errors.length ? '\n\nErrors:\n' + r.errors.slice(0, 5).join('\n') : ''));
         parent.postMessage({ pluginMessage: { type: 'get-text-styles' } }, '*');
       } else if (msg.type === 'download-json') {
+        // If we're collecting both files into a zip, buffer instead of downloading
+        if (_zipBuffer) {
+          if (msg.filename === 'figma-typography.json') _zipBuffer.typography = msg.json;
+          else _zipBuffer.variables = msg.json;
+
+          if (_zipBuffer.variables !== null && _zipBuffer.typography !== null) {
+            const zipBytes = createZip([
+              { name: 'variables.json', content: _zipBuffer.variables },
+              { name: 'typography.json', content: _zipBuffer.typography }
+            ]);
+            const zipBlob = new Blob([zipBytes], { type: 'application/zip' });
+            const zipUrl = URL.createObjectURL(zipBlob);
+            const za = document.createElement('a');
+            za.href = zipUrl;
+            za.download = 'figma-tokens.zip';
+            za.click();
+            URL.revokeObjectURL(zipUrl);
+            _zipBuffer = null;
+          }
+          return;
+        }
         const blob = new Blob([msg.json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1500,6 +1874,8 @@
         a.click();
         URL.revokeObjectURL(url);
       } else if (msg.type === 'error') {
+        // Cancel any pending zip collection on backend error so we don't hang
+        _zipBuffer = null;
         alert('Error: ' + msg.error);
       }
     };
