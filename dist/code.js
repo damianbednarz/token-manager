@@ -1410,13 +1410,33 @@
     "src/code.ts"(exports) {
       init_create_data();
       figma.showUI(__html__, { width: 450, height: 600 });
+      function getDesignExportBaseName() {
+        const normalized = figma.root.name.trim().toLowerCase().replace(/["']/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        return normalized || "figma";
+      }
+      function getDesignExportFileName(kind) {
+        return `${getDesignExportBaseName()}-${kind}.json`;
+      }
       function hexToRgb(hex) {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? {
-          r: parseInt(result[1], 16) / 255,
-          g: parseInt(result[2], 16) / 255,
-          b: parseInt(result[3], 16) / 255
-        } : null;
+        const normalized = hex.trim().replace(/^#/, "");
+        if (!/^[a-f\d]{3,4}$|^[a-f\d]{6}$|^[a-f\d]{8}$/i.test(normalized)) {
+          return null;
+        }
+        const expanded = normalized.length === 3 || normalized.length === 4 ? normalized.split("").map((char) => char + char).join("") : normalized;
+        return {
+          r: parseInt(expanded.slice(0, 2), 16) / 255,
+          g: parseInt(expanded.slice(2, 4), 16) / 255,
+          b: parseInt(expanded.slice(4, 6), 16) / 255,
+          a: expanded.length === 8 ? parseInt(expanded.slice(6, 8), 16) / 255 : 1
+        };
+      }
+      function rgbToHex(value) {
+        const r = Math.round(value.r * 255);
+        const g = Math.round(value.g * 255);
+        const b = Math.round(value.b * 255);
+        const alpha = "a" in value && typeof value.a === "number" ? Math.round(value.a * 255) : 255;
+        const hex = [r, g, b].map((channel) => channel.toString(16).padStart(2, "0")).join("");
+        return alpha < 255 ? `#${hex}${alpha.toString(16).padStart(2, "0")}` : `#${hex}`;
       }
       function parseTokenValue(token) {
         var _a, _b, _c;
@@ -1853,10 +1873,7 @@
       }
       function formatVariableValue(variable, value) {
         if (variable.resolvedType === "COLOR" && typeof value === "object") {
-          const r = Math.round(value.r * 255);
-          const g = Math.round(value.g * 255);
-          const b = Math.round(value.b * 255);
-          return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+          return rgbToHex(value);
         }
         return value;
       }
@@ -1994,7 +2011,7 @@
             figma.ui.postMessage({
               type: "download-json",
               json: jsonString,
-              filename: "figma-tokens.json"
+              filename: getDesignExportFileName("tokens")
             });
             figma.notify("Tokens exported successfully");
           } catch (error) {
@@ -2044,10 +2061,7 @@
                 const value = v.valuesByMode[defaultMode];
                 let displayValue = value;
                 if (v.resolvedType === "COLOR" && typeof value === "object") {
-                  const r = Math.round(value.r * 255);
-                  const g = Math.round(value.g * 255);
-                  const b = Math.round(value.b * 255);
-                  displayValue = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+                  displayValue = rgbToHex(value);
                 } else if (typeof value === "number") {
                   displayValue = value;
                 } else if (typeof value === "boolean") {
@@ -2315,7 +2329,7 @@
             figma.ui.postMessage({
               type: "download-json",
               json: JSON.stringify(tokens, null, 2),
-              filename: "figma-typography.json"
+              filename: getDesignExportFileName("typography")
             });
             figma.notify("Text styles exported");
           } catch (error) {

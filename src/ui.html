@@ -1077,6 +1077,13 @@
     // Holds buffered exports when we need to bundle into a zip.
     var _zipBuffer = null;
 
+    function getExportZipBaseName(filename) {
+      const baseName = String(filename || '')
+        .replace(/-(tokens|typography)\.json$/i, '')
+        .replace(/\.json$/i, '');
+      return baseName || 'figma';
+    }
+
     function exportFromSelection() {
       const folderIds = getCheckedFolderIds();
       const hasTypography = folderIds.indexOf('__typography__') !== -1;
@@ -1087,7 +1094,7 @@
 
       if (exportVariables && exportTypography) {
         // Need both — collect into a zip and download once
-        _zipBuffer = { variables: null, typography: null };
+        _zipBuffer = { variables: null, variablesFilename: null, typography: null, typographyFilename: null };
         const tokensPayload = { type: 'export-tokens' };
         if (variableCollectionIds.length > 0) tokensPayload.collectionIds = variableCollectionIds;
         parent.postMessage({ pluginMessage: tokensPayload }, '*');
@@ -1856,19 +1863,29 @@
       } else if (msg.type === 'download-json') {
         // If we're collecting both files into a zip, buffer instead of downloading
         if (_zipBuffer) {
-          if (msg.filename === 'figma-typography.json') _zipBuffer.typography = msg.json;
-          else _zipBuffer.variables = msg.json;
+          if (/-typography\.json$/i.test(msg.filename)) {
+            _zipBuffer.typography = msg.json;
+            _zipBuffer.typographyFilename = msg.filename;
+          } else {
+            _zipBuffer.variables = msg.json;
+            _zipBuffer.variablesFilename = msg.filename;
+          }
 
-          if (_zipBuffer.variables !== null && _zipBuffer.typography !== null) {
+          if (
+            _zipBuffer.variables !== null
+            && _zipBuffer.typography !== null
+            && _zipBuffer.variablesFilename
+            && _zipBuffer.typographyFilename
+          ) {
             const zipBytes = createZip([
-              { name: 'variables.json', content: _zipBuffer.variables },
-              { name: 'typography.json', content: _zipBuffer.typography }
+              { name: _zipBuffer.variablesFilename, content: _zipBuffer.variables },
+              { name: _zipBuffer.typographyFilename, content: _zipBuffer.typography }
             ]);
             const zipBlob = new Blob([zipBytes], { type: 'application/zip' });
             const zipUrl = URL.createObjectURL(zipBlob);
             const za = document.createElement('a');
             za.href = zipUrl;
-            za.download = 'figma-tokens.zip';
+            za.download = getExportZipBaseName(_zipBuffer.variablesFilename) + '.zip';
             za.click();
             URL.revokeObjectURL(zipUrl);
             _zipBuffer = null;

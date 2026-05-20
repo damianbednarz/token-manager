@@ -5,6 +5,21 @@ import { THEMES, STYLES, BASE_THEMES, DEFAULT_BASE, STYLE_RADIUS } from './creat
 
 figma.showUI(__html__, { width: 450, height: 600 });
 
+function getDesignExportBaseName(): string {
+  const normalized = figma.root.name
+    .trim()
+    .toLowerCase()
+    .replace(/["']/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return normalized || 'figma';
+}
+
+function getDesignExportFileName(kind: 'tokens' | 'typography'): string {
+  return `${getDesignExportBaseName()}-${kind}.json`;
+}
+
 interface TokenValue {
   value: string | number;
   type?: string;
@@ -677,7 +692,7 @@ figma.ui.onmessage = async (msg) => {
       figma.ui.postMessage({
         type: 'download-json',
         json: jsonString,
-        filename: 'figma-tokens.json'
+        filename: getDesignExportFileName('tokens')
       });
 
       figma.notify('Tokens exported successfully');
@@ -990,7 +1005,7 @@ figma.ui.onmessage = async (msg) => {
       figma.ui.postMessage({
         type: 'download-json',
         json: JSON.stringify(tokens, null, 2),
-        filename: 'figma-typography.json'
+        filename: getDesignExportFileName('typography')
       });
       figma.notify('Text styles exported');
     } catch (error) {
