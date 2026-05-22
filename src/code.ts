@@ -3,7 +3,15 @@
 
 import { THEMES, STYLES, BASE_THEMES, DEFAULT_BASE, STYLE_RADIUS } from './create-data';
 
-figma.showUI(__html__, { width: 450, height: 600 });
+figma.showUI(__html__, { width: 460, height: 700 });
+
+let currentThemeName: string | null = null;
+let inspectScreenActive = false;
+
+figma.on('selectionchange', async () => {
+  if (!inspectScreenActive) return;
+  await runSelectionCheck();
+});
 
 interface TokenValue {
   value: string | number;
@@ -455,8 +463,7 @@ async function rebindAllReferences(remapping: Map<string, Variable>): Promise<Re
         if (val && typeof val === 'object' && val.type === 'VARIABLE_ALIAS' && val.id) {
           const nv = remapping.get(val.id);
           if (nv) {
-            v.setValueForMode(modeId, { type: 'VARIABLE_ALIAS', id: nv.id });
-            stats.variables++;
+            try { v.setValueForMode(modeId, { type: 'VARIABLE_ALIAS', id: nv.id }); stats.variables++; } catch {}
           }
         }
       }
@@ -514,6 +521,587 @@ async function getFigmaVariables() {
 
   return variables;
 }
+
+// ── Inspect feature ────────────────────────────────────────────────────────
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const h = (v: number) => Math.round(v * 255).toString(16).padStart(2, '0');
+  return '#' + h(r) + h(g) + h(b);
+}
+
+function rgbClose(
+  a: { r: number; g: number; b: number },
+  b: { r: number; g: number; b: number }
+): boolean {
+  return Math.abs(a.r - b.r) < 0.015 && Math.abs(a.g - b.g) < 0.015 && Math.abs(a.b - b.b) < 0.015;
+}
+
+interface LayerIssue {
+  category: 'color' | 'spacing' | 'typography';
+  property: string;
+  status: 'hardcoded' | 'mismatch' | 'ok';
+  colorHex?: string;
+  expectedHex?: string;
+  currentValue?: string;
+  expectedValue?: string;
+  variableName?: string;
+  tokenName?: string;
+}
+
+interface NodeResult {
+  nodeId: string;
+  nodeName: string;
+  nodeType: string;
+  path: string;
+  issues: LayerIssue[];
+}
+
+async function checkPaints(
+  paints: ReadonlyArray<Paint>,
+  propertyName: string,
+  themeColorMap: Map<string, { r: number; g: number; b: number }>,
+  issues: LayerIssue[]
+): Promise<void> {
+  for (let i = 0; i < paints.length; i++) {
+    const paint = paints[i];
+    if (paint.type !== 'SOLID') continue;
+
+    const solid = paint as SolidPaint;
+    const colorHex = rgbToHex(solid.color.r, solid.color.g, solid.color.b);
+    const label = paints.length > 1 ? `${propertyName}[${i}]` : propertyName;
+    const boundColor = (solid as any).boundVariables?.color;
+
+    if (!boundColor?.id) {
+      issues.push({ category: 'color', property: label, status: 'hardcoded', colorHex });
+      continue;
+    }
+
+    const variable = await figma.variables.getVariableByIdAsync(boundColor.id);
+    if (!variable) {
+      issues.push({ category: 'color', property: label, status: 'hardcoded', colorHex });
+      continue;
+    }
+
+    const varName = variable.name;
+    const tokenKey = (varName.split('/').pop() || varName).toLowerCase();
+
+    if (themeColorMap.size === 0) {
+      issues.push({ category: 'color', property: label, status: 'ok', colorHex, variableName: varName, tokenName: tokenKey });
+      continue;
+    }
+
+    const expectedRgb = themeColorMap.get(tokenKey);
+    if (!expectedRgb) {
+      issues.push({ category: 'color', property: label, status: 'ok', colorHex, variableName: varName, tokenName: tokenKey });
+      continue;
+    }
+
+    const expectedHex = rgbToHex(expectedRgb.r, expectedRgb.g, expectedRgb.b);
+    const isMatch = rgbClose(solid.color, expectedRgb);
+    issues.push({
+      category: 'color',
+      property: label,
+      status: isMatch ? 'ok' : 'mismatch',
+      colorHex,
+      expectedHex: isMatch ? undefined : expectedHex,
+      variableName: varName,
+      tokenName: tokenKey
+    });
+  }
+}
+
+function checkFloatProp(node: BaseNode, propName: string, issues: LayerIssue[]): void {
+  const val = (node as any)[propName];
+  if (typeof val !== 'number' || val === 0) return;
+  const bound = (node as any).boundVariables?.[propName];
+  if (bound?.type === 'VARIABLE_ALIAS') {
+    const variable = figma.variables.getVariableById(bound.id);
+    if (variable && variable.resolvedType === 'FLOAT') {
+      issues.push({ category: 'spacing', property: propName, status: 'ok', currentValue: String(val), variableName: variable.name });
+    }
+    return;
+  }
+  issues.push({ category: 'spacing', property: propName, status: 'hardcoded', currentValue: String(val) });
+}
+
+function checkTypographyNode(node: TextNode, issues: LayerIssue[]): void {
+  const styleId = node.textStyleId;
+  if (!styleId || typeof styleId === 'symbol') {
+    let fontDesc = '';
+    try {
+      if (typeof node.fontName !== 'symbol') fontDesc = (node.fontName as FontName).family;
+      if (typeof node.fontSize === 'number') fontDesc += (fontDesc ? ' ' : '') + node.fontSize + 'px';
+    } catch {}
+    issues.push({ category: 'typography', property: 'textStyle', status: 'hardcoded', currentValue: fontDesc || 'no style' });
+  } else {
+    const style = figma.getStyleById(styleId as string);
+    issues.push({ category: 'typography', property: 'textStyle', status: 'ok', variableName: style ? style.name : 'unknown style' });
+  }
+}
+
+async function scanNode(
+  node: BaseNode,
+  themeColorMap: Map<string, { r: number; g: number; b: number }>,
+  results: NodeResult[],
+  pathParts: string[],
+  depth: number,
+  counter: { count: number; max: number },
+  maxDepth = 8
+): Promise<void> {
+  if (depth > maxDepth || counter.count > counter.max) return;
+  counter.count++;
+
+  const issues: LayerIssue[] = [];
+
+  if ('fills' in node) {
+    const fills = (node as any).fills;
+    if (Array.isArray(fills) && fills.length > 0) {
+      await checkPaints(fills as Paint[], 'fill', themeColorMap, issues);
+    }
+  }
+  if ('strokes' in node) {
+    const strokes = (node as any).strokes;
+    if (Array.isArray(strokes) && strokes.length > 0) {
+      await checkPaints(strokes as Paint[], 'stroke', themeColorMap, issues);
+    }
+  }
+
+  for (const prop of ['paddingLeft', 'paddingRight', 'paddingTop', 'paddingBottom', 'cornerRadius']) {
+    if (prop in node) checkFloatProp(node, prop, issues);
+  }
+  if ('itemSpacing' in node && (node as any).layoutMode && (node as any).layoutMode !== 'NONE') {
+    checkFloatProp(node, 'itemSpacing', issues);
+  }
+
+  if (node.type === 'TEXT') checkTypographyNode(node as TextNode, issues);
+
+  if (issues.length > 0) {
+    results.push({
+      nodeId: node.id,
+      nodeName: node.name,
+      nodeType: node.type,
+      path: pathParts.join(' › '),
+      issues
+    });
+  }
+
+  if ('children' in node) {
+    for (const child of (node as ChildrenMixin).children) {
+      await scanNode(child, themeColorMap, results, [...pathParts, child.name], depth + 1, counter, maxDepth);
+    }
+  }
+}
+
+async function runSelectionCheck(): Promise<void> {
+  const selection = figma.currentPage.selection;
+
+  if (selection.length === 0) {
+    figma.ui.postMessage({ type: 'selection-check-result', nodes: [], empty: true, themeName: currentThemeName });
+    return;
+  }
+
+  const themeColorMap = new Map<string, { r: number; g: number; b: number }>();
+  if (currentThemeName) {
+    const lightBlock = buildThemeBlock(currentThemeName, 'light');
+    for (const [key, value] of Object.entries(lightBlock)) {
+      const rgb = colorValueToRgb(value);
+      if (rgb) themeColorMap.set(key.toLowerCase(), rgb);
+    }
+  }
+
+  const results: NodeResult[] = [];
+  const counter = { count: 0, max: 200 };
+  for (const node of selection) {
+    await scanNode(node, themeColorMap, results, [node.name], 0, counter);
+  }
+
+  figma.ui.postMessage({
+    type: 'selection-check-result',
+    nodes: results,
+    empty: false,
+    themeName: currentThemeName,
+    totalScanned: counter.count
+  });
+}
+
+function parsePropKey(raw: string): { propName: 'fills' | 'strokes'; index: number } {
+  const m = raw.match(/^(fill|stroke)\[(\d+)\]$/);
+  if (m) return { propName: m[1] === 'stroke' ? 'strokes' : 'fills', index: parseInt(m[2]) };
+  return { propName: raw.startsWith('stroke') ? 'strokes' : 'fills', index: 0 };
+}
+
+async function fixSingleIssue(
+  nodeId: string,
+  propertyRaw: string,
+  status: string,
+  variableName: string | undefined,
+  themeName: string | null
+): Promise<void> {
+  const node = figma.getNodeById(nodeId);
+  if (!node) return;
+
+  const collections = await figma.variables.getLocalVariableCollectionsAsync();
+
+  const spacingPropNames = ['paddingLeft', 'paddingRight', 'paddingTop', 'paddingBottom', 'itemSpacing', 'cornerRadius'];
+  if (spacingPropNames.indexOf(propertyRaw) !== -1) {
+    if (status === 'hardcoded') {
+      const val = (node as any)[propertyRaw];
+      if (typeof val !== 'number') return;
+      let bestVar: Variable | null = null;
+      let bestDist = Infinity;
+      for (const col of collections) {
+        const modeId = col.modes[0].modeId;
+        for (const id of col.variableIds) {
+          const v = await figma.variables.getVariableByIdAsync(id);
+          if (!v || v.resolvedType !== 'FLOAT') continue;
+          const varVal = v.valuesByMode[modeId];
+          if (typeof varVal !== 'number') continue;
+          const dist = Math.abs(varVal - val);
+          if (dist < bestDist) { bestDist = dist; bestVar = v; }
+        }
+      }
+      if (bestVar) {
+        try { (node as any).setBoundVariable(propertyRaw as VariableBindableNodeField, bestVar); } catch {}
+      }
+    }
+    return;
+  }
+
+  const { propName, index } = parsePropKey(propertyRaw);
+  const rawPaints: Paint[] = [...((node as any)[propName] || [])];
+  const paint = rawPaints[index];
+  if (!paint || paint.type !== 'SOLID') return;
+  const solid = paint as SolidPaint;
+
+  if (status === 'mismatch' && variableName && themeName) {
+    for (const col of collections) {
+      for (const id of col.variableIds) {
+        const v = await figma.variables.getVariableByIdAsync(id);
+        if (!v || v.name !== variableName) continue;
+        const lightBlock = buildThemeBlock(themeName, 'light');
+        const tokenKey = (v.name.split('/').pop() || v.name).toLowerCase();
+        const expectedVal = lightBlock[tokenKey] ||
+          lightBlock[Object.keys(lightBlock).find(k => k.toLowerCase() === tokenKey) || ''] || '';
+        const rgb = colorValueToRgb(expectedVal);
+        if (rgb) { try { v.setValueForMode(col.modes[0].modeId, rgb); } catch {} }
+        return;
+      }
+    }
+    return;
+  }
+
+  if (status === 'hardcoded') {
+    let bestVar: Variable | null = null;
+    let bestDist = Infinity;
+    for (const col of collections) {
+      const modeId = col.modes[0].modeId;
+      for (const id of col.variableIds) {
+        const v = await figma.variables.getVariableByIdAsync(id);
+        if (!v || v.resolvedType !== 'COLOR') continue;
+        const val = v.valuesByMode[modeId] as any;
+        if (!val || typeof val.r !== 'number') continue;
+        const dist = (val.r - solid.color.r) ** 2 +
+                     (val.g - solid.color.g) ** 2 +
+                     (val.b - solid.color.b) ** 2;
+        if (dist < bestDist) { bestDist = dist; bestVar = v; }
+      }
+    }
+    if (bestVar) {
+      const newPaint = figma.variables.setBoundVariableForPaint(solid, 'color', bestVar);
+      rawPaints[index] = newPaint;
+      (node as any)[propName] = rawPaints;
+    }
+  }
+}
+
+// ── Page Audit ─────────────────────────────────────────────────────────────
+
+async function runPageAudit(): Promise<void> {
+  const themeColorMap = new Map<string, { r: number; g: number; b: number }>();
+  if (currentThemeName) {
+    const lightBlock = buildThemeBlock(currentThemeName, 'light');
+    for (const [key, value] of Object.entries(lightBlock)) {
+      const rgb = colorValueToRgb(value);
+      if (rgb) themeColorMap.set(key.toLowerCase(), rgb);
+    }
+  }
+
+  const results: NodeResult[] = [];
+  const counter = { count: 0, max: 5000 };
+  for (const node of figma.currentPage.children) {
+    await scanNode(node, themeColorMap, results, [node.name], 0, counter, 30);
+  }
+
+  let hardcoded = 0, mismatch = 0, ok = 0;
+  const byCategory = { color: { hardcoded: 0, mismatch: 0 }, spacing: { hardcoded: 0 }, typography: { hardcoded: 0 } };
+  for (const n of results) {
+    for (const iss of n.issues) {
+      if (iss.status === 'hardcoded') {
+        hardcoded++;
+        if (iss.category === 'color') byCategory.color.hardcoded++;
+        else if (iss.category === 'spacing') byCategory.spacing.hardcoded++;
+        else byCategory.typography.hardcoded++;
+      } else if (iss.status === 'mismatch') { mismatch++; byCategory.color.mismatch++; }
+      else ok++;
+    }
+  }
+  const total = hardcoded + mismatch + ok;
+  const score = total > 0 ? Math.round((ok / total) * 100) : 100;
+
+  figma.ui.postMessage({
+    type: 'page-audit-result',
+    nodes: results,
+    totalScanned: counter.count,
+    hardcoded, mismatch, ok, score, byCategory,
+    themeName: currentThemeName
+  });
+}
+
+// ── Unused Variables ────────────────────────────────────────────────────────
+
+function extractUsedVariableIds(node: BaseNode, usedIds: Set<string>): void {
+  const bv = (node as any).boundVariables;
+  if (bv) {
+    for (const key of Object.keys(bv)) {
+      const binding = bv[key];
+      if (!binding) continue;
+      if (Array.isArray(binding)) {
+        for (const b of binding) { if (b?.type === 'VARIABLE_ALIAS') usedIds.add(b.id); }
+      } else if (binding.type === 'VARIABLE_ALIAS') {
+        usedIds.add(binding.id);
+      }
+    }
+  }
+  for (const prop of ['fills', 'strokes', 'effects']) {
+    const arr = (node as any)[prop];
+    if (!Array.isArray(arr)) continue;
+    for (const item of arr) {
+      const itemBv = (item as any).boundVariables;
+      if (!itemBv) continue;
+      for (const key of Object.keys(itemBv)) {
+        const b = itemBv[key];
+        if (b?.type === 'VARIABLE_ALIAS') usedIds.add(b.id);
+      }
+    }
+  }
+}
+
+async function findUnusedVariables(): Promise<{
+  unused: Array<{ id: string; name: string; type: string; collection: string; value: string }>;
+  total: number;
+}> {
+  const usedIds = new Set<string>();
+  const visit = (node: BaseNode) => {
+    extractUsedVariableIds(node, usedIds);
+    if ('children' in node) {
+      for (const child of (node as ChildrenMixin).children) visit(child);
+    }
+  };
+  for (const page of figma.root.children) visit(page);
+
+  const paintStyles = await figma.getLocalPaintStylesAsync();
+  for (const style of paintStyles) {
+    for (const paint of style.paints) {
+      const bv = (paint as any).boundVariables;
+      if (!bv) continue;
+      for (const key of Object.keys(bv)) {
+        const b = bv[key];
+        if (b?.type === 'VARIABLE_ALIAS') usedIds.add(b.id);
+      }
+    }
+  }
+
+  const collections = await figma.variables.getLocalVariableCollectionsAsync();
+  const unused: Array<{ id: string; name: string; type: string; collection: string; value: string }> = [];
+  let total = 0;
+  for (const col of collections) {
+    total += col.variableIds.length;
+    for (const id of col.variableIds) {
+      if (usedIds.has(id)) continue;
+      const v = await figma.variables.getVariableByIdAsync(id);
+      if (!v) continue;
+      const val = v.valuesByMode[col.modes[0].modeId];
+      let displayVal = '';
+      if (v.resolvedType === 'COLOR' && val && typeof val === 'object' && 'r' in val) {
+        displayVal = rgbToHex((val as any).r, (val as any).g, (val as any).b);
+      } else { displayVal = String(val); }
+      unused.push({ id, name: v.name, type: v.resolvedType, collection: col.name, value: displayVal });
+    }
+  }
+  return { unused, total };
+}
+
+// ── Component Token Export ──────────────────────────────────────────────────
+
+function collectComponentTokens(nodes: readonly BaseNode[]): Array<{
+  variableId: string; name: string; type: string; value: string; property: string;
+}> {
+  const found = new Map<string, { variableId: string; name: string; type: string; value: string; property: string }>();
+
+  const visitNode = (node: BaseNode) => {
+    const bv = (node as any).boundVariables;
+    if (bv) {
+      for (const [prop, binding] of Object.entries(bv)) {
+        if (!binding || Array.isArray(binding)) continue;
+        const b = binding as any;
+        if (b.type !== 'VARIABLE_ALIAS' || found.has(b.id)) continue;
+        const v = figma.variables.getVariableById(b.id);
+        if (!v) continue;
+        const val = v.valuesByMode[Object.keys(v.valuesByMode)[0]];
+        let displayVal = '';
+        if (v.resolvedType === 'COLOR' && val && typeof val === 'object' && 'r' in val) {
+          displayVal = rgbToHex((val as any).r, (val as any).g, (val as any).b);
+        } else { displayVal = String(val); }
+        found.set(b.id, { variableId: b.id, name: v.name, type: v.resolvedType, value: displayVal, property: prop });
+      }
+    }
+    for (const paintProp of ['fills', 'strokes']) {
+      const arr = (node as any)[paintProp];
+      if (!Array.isArray(arr)) continue;
+      for (const paint of arr) {
+        const paintBv = (paint as any).boundVariables;
+        if (!paintBv) continue;
+        for (const [, b] of Object.entries(paintBv)) {
+          const binding = b as any;
+          if (!binding || binding.type !== 'VARIABLE_ALIAS' || found.has(binding.id)) continue;
+          const v = figma.variables.getVariableById(binding.id);
+          if (!v) continue;
+          const val = v.valuesByMode[Object.keys(v.valuesByMode)[0]];
+          let displayVal = '';
+          if (v.resolvedType === 'COLOR' && val && typeof val === 'object' && 'r' in val) {
+            displayVal = rgbToHex((val as any).r, (val as any).g, (val as any).b);
+          } else { displayVal = String(val); }
+          found.set(binding.id, { variableId: binding.id, name: v.name, type: v.resolvedType, value: displayVal, property: paintProp });
+        }
+      }
+    }
+    if ('children' in node) {
+      for (const child of (node as ChildrenMixin).children) visitNode(child);
+    }
+  };
+
+  for (const node of nodes) visitNode(node);
+  return Array.from(found.values());
+}
+
+// ── Astro Component Map ─────────────────────────────────────────────────────
+
+// All 43 components from https://github.com/bejamas/ui/tree/main/packages/ui/src/components
+// Import paths use the shadcn copy-into-project pattern: npx bejamas@latest add <name>
+const ASTRO_COMPONENT_MAP: Record<string, {
+  component: string; importPath: string; variants?: string[]; example: string; description: string;
+}> = {
+  // Keys use the exact folder names from bejamas/ui for reliable matching
+  'accordion': { component: 'Accordion', importPath: "import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/ui/accordion';", example: '<Accordion>\n  <AccordionItem value="item-1">\n    <AccordionTrigger>Title</AccordionTrigger>\n    <AccordionContent>Content</AccordionContent>\n  </AccordionItem>\n</Accordion>', description: 'Collapsible content sections' },
+  'alert': { component: 'Alert', importPath: "import { Alert, AlertTitle, AlertDescription } from '@/ui/alert';", variants: ['default', 'destructive'], example: '<Alert>\n  <AlertTitle>Heads up!</AlertTitle>\n  <AlertDescription>Something important.</AlertDescription>\n</Alert>', description: 'Contextual feedback messages' },
+  'avatar': { component: 'Avatar', importPath: "import { Avatar, AvatarImage, AvatarFallback, AvatarBadge, AvatarGroup } from '@/ui/avatar';", example: '<Avatar>\n  <AvatarImage src="/photo.png" />\n  <AvatarFallback>AB</AvatarFallback>\n</Avatar>', description: 'User profile image with fallback and group support' },
+  'badge': { component: 'Badge', importPath: "import { Badge } from '@/ui/badge';", variants: ['default', 'secondary', 'destructive', 'outline'], example: '<Badge variant="default">New</Badge>', description: 'Small status descriptor label' },
+  'breadcrumb': { component: 'Breadcrumb', importPath: "import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbSeparator } from '@/ui/breadcrumb';", example: '<Breadcrumb>\n  <BreadcrumbList>\n    <BreadcrumbItem><a href="/">Home</a></BreadcrumbItem>\n    <BreadcrumbSeparator />\n    <BreadcrumbItem>Page</BreadcrumbItem>\n  </BreadcrumbList>\n</Breadcrumb>', description: 'Navigation breadcrumb trail' },
+  'button-group': { component: 'ButtonGroup', importPath: "import { ButtonGroup } from '@/ui/button-group';", example: '<ButtonGroup>\n  <Button>One</Button>\n  <Button>Two</Button>\n</ButtonGroup>', description: 'Visually grouped set of buttons' },
+  'button': { component: 'Button', importPath: "import { Button } from '@/ui/button';", variants: ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'], example: '<Button variant="default" size="default">Click me</Button>', description: 'Interactive trigger (sizes: default, sm, lg, icon, icon-sm, icon-lg)' },
+  'card': { component: 'Card', importPath: "import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, CardMedia, CardAction } from '@/ui/card';", example: '<Card>\n  <CardHeader>\n    <CardTitle>Title</CardTitle>\n    <CardDescription>Description</CardDescription>\n  </CardHeader>\n  <CardContent>Content</CardContent>\n  <CardFooter>Footer</CardFooter>\n</Card>', description: 'Sectioned content container' },
+  'carousel': { component: 'Carousel', importPath: "import { Carousel, CarouselItem } from '@/ui/carousel';", example: '<Carousel>\n  <CarouselItem>Slide 1</CarouselItem>\n  <CarouselItem>Slide 2</CarouselItem>\n</Carousel>', description: 'Horizontally scrollable item carousel' },
+  'checkbox': { component: 'Checkbox', importPath: "import { Checkbox } from '@/ui/checkbox';", example: '<label>\n  <Checkbox id="terms" />\n  Accept terms\n</label>', description: 'Binary selection checkbox' },
+  'collapsible': { component: 'Collapsible', importPath: "import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/ui/collapsible';", example: '<Collapsible>\n  <CollapsibleTrigger>Toggle</CollapsibleTrigger>\n  <CollapsibleContent>Hidden content</CollapsibleContent>\n</Collapsible>', description: 'Show/hide content with a trigger' },
+  'combobox': { component: 'Combobox', importPath: "import { Combobox } from '@/ui/combobox';", example: '<Combobox placeholder="Search..." />', description: 'Searchable select combobox' },
+  'command': { component: 'Command', importPath: "import { Command, CommandInput, CommandList, CommandItem, CommandGroup } from '@/ui/command';", example: '<Command>\n  <CommandInput placeholder="Type a command..." />\n  <CommandList>\n    <CommandGroup heading="Suggestions">\n      <CommandItem>Action</CommandItem>\n    </CommandGroup>\n  </CommandList>\n</Command>', description: 'Command palette / search dialog' },
+  'date': { component: 'DatePicker', importPath: "import { DatePicker } from '@/ui/date';", example: '<DatePicker />', description: 'Date picker input' },
+  'dialog': { component: 'Dialog', importPath: "import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/ui/dialog';", example: '<Dialog>\n  <DialogTrigger>Open</DialogTrigger>\n  <DialogContent>\n    <DialogHeader>\n      <DialogTitle>Title</DialogTitle>\n      <DialogDescription>Description</DialogDescription>\n    </DialogHeader>\n    <DialogFooter><DialogClose>Close</DialogClose></DialogFooter>\n  </DialogContent>\n</Dialog>', description: 'Modal dialog overlay' },
+  'dropdown-menu': { component: 'DropdownMenu', importPath: "import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuGroup } from '@/ui/dropdown-menu';", example: '<DropdownMenu>\n  <DropdownMenuTrigger>Open</DropdownMenuTrigger>\n  <DropdownMenuContent>\n    <DropdownMenuLabel>Label</DropdownMenuLabel>\n    <DropdownMenuSeparator />\n    <DropdownMenuItem>Item</DropdownMenuItem>\n  </DropdownMenuContent>\n</DropdownMenu>', description: 'Dropdown action menu' },
+  'field': { component: 'Field', importPath: "import { Field, FieldLabel, FieldError } from '@/ui/field';", example: '<Field>\n  <FieldLabel>Email</FieldLabel>\n  <Input type="email" />\n  <FieldError>Invalid email</FieldError>\n</Field>', description: 'Form field wrapper with label and error' },
+  'hover-card': { component: 'HoverCard', importPath: "import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/ui/hover-card';", example: '<HoverCard>\n  <HoverCardTrigger>Hover me</HoverCardTrigger>\n  <HoverCardContent>Preview content</HoverCardContent>\n</HoverCard>', description: 'Rich hover preview card' },
+  'icon': { component: 'Icon', importPath: "import { Icon } from '@/ui/icon';", example: '<Icon name="arrow-right" />', description: 'Icon display component' },
+  'input-group': { component: 'InputGroup', importPath: "import { InputGroup } from '@/ui/input-group';", example: '<InputGroup>\n  <span>@</span>\n  <Input placeholder="username" />\n</InputGroup>', description: 'Input with prefix/suffix addons' },
+  'input': { component: 'Input', importPath: "import { Input } from '@/ui/input';", example: '<Input type="text" placeholder="Enter value..." />', description: 'Single-line text input' },
+  'kbd': { component: 'Kbd', importPath: "import { Kbd } from '@/ui/kbd';", example: '<Kbd>⌘K</Kbd>', description: 'Keyboard shortcut display' },
+  'label': { component: 'Label', importPath: "import { Label } from '@/ui/label';", example: '<Label for="field-id">Field label</Label>', description: 'Accessible form field label' },
+  'link-group': { component: 'LinkGroup', importPath: "import { LinkGroup } from '@/ui/link-group';", example: '<LinkGroup>\n  <a href="/">Home</a>\n  <a href="/about">About</a>\n</LinkGroup>', description: 'Grouped set of links' },
+  'marquee': { component: 'Marquee', importPath: "import { Marquee } from '@/ui/marquee';", example: '<Marquee>\n  <span>Scrolling content ·</span>\n</Marquee>', description: 'Continuously scrolling content strip' },
+  'native-select': { component: 'NativeSelect', importPath: "import { NativeSelect } from '@/ui/native-select';", example: '<NativeSelect>\n  <option value="a">Option A</option>\n  <option value="b">Option B</option>\n</NativeSelect>', description: 'Styled native HTML select element' },
+  'navigation-menu': { component: 'NavigationMenu', importPath: "import { NavigationMenu, NavigationMenuList, NavigationMenuItem, NavigationMenuTrigger, NavigationMenuContent, NavigationMenuLink } from '@/ui/navigation-menu';", example: '<NavigationMenu>\n  <NavigationMenuList>\n    <NavigationMenuItem>\n      <NavigationMenuTrigger>Products</NavigationMenuTrigger>\n      <NavigationMenuContent>...</NavigationMenuContent>\n    </NavigationMenuItem>\n  </NavigationMenuList>\n</NavigationMenu>', description: 'Accessible top-level navigation menu' },
+  'popover': { component: 'Popover', importPath: "import { Popover, PopoverTrigger, PopoverContent, PopoverClose, PopoverHeader, PopoverTitle, PopoverDescription } from '@/ui/popover';", example: '<Popover>\n  <PopoverTrigger>Open</PopoverTrigger>\n  <PopoverContent>\n    <PopoverHeader><PopoverTitle>Title</PopoverTitle></PopoverHeader>\n    Content\n  </PopoverContent>\n</Popover>', description: 'Floating anchored content panel' },
+  'radio-group': { component: 'RadioGroup', importPath: "import { RadioGroup, RadioGroupItem } from '@/ui/radio-group';", example: '<RadioGroup defaultValue="a">\n  <label><RadioGroupItem value="a" /> Option A</label>\n  <label><RadioGroupItem value="b" /> Option B</label>\n</RadioGroup>', description: 'Single-select radio button group' },
+  'select': { component: 'Select', importPath: "import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel } from '@/ui/select';", example: '<Select>\n  <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>\n  <SelectContent>\n    <SelectGroup>\n      <SelectLabel>Options</SelectLabel>\n      <SelectItem value="a">Option A</SelectItem>\n    </SelectGroup>\n  </SelectContent>\n</Select>', description: 'Dropdown select menu' },
+  'separator': { component: 'Separator', importPath: "import { Separator } from '@/ui/separator';", example: '<Separator orientation="horizontal" />', description: 'Visual divider line' },
+  'skeleton': { component: 'Skeleton', importPath: "import { Skeleton } from '@/ui/skeleton';", example: '<Skeleton class="h-4 w-48 rounded" />', description: 'Loading skeleton placeholder' },
+  'slider': { component: 'Slider', importPath: "import { Slider } from '@/ui/slider';", example: '<Slider defaultValue={[50]} min={0} max={100} step={1} />', description: 'Range value slider' },
+  'spinner': { component: 'Spinner', importPath: "import { Spinner } from '@/ui/spinner';", example: '<Spinner />', description: 'Loading spinner indicator' },
+  'switch': { component: 'Switch', importPath: "import { Switch } from '@/ui/switch';", example: '<Switch id="toggle" />', description: 'Toggle on/off control' },
+  'table': { component: 'Table', importPath: "import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell, TableFooter, TableCaption } from '@/ui/table';", example: '<Table>\n  <TableHeader><TableRow><TableHead>Name</TableHead></TableRow></TableHeader>\n  <TableBody><TableRow><TableCell>Value</TableCell></TableRow></TableBody>\n</Table>', description: 'Data table layout' },
+  'tabs': { component: 'Tabs', importPath: "import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/ui/tabs';", example: '<Tabs defaultValue="tab1">\n  <TabsList><TabsTrigger value="tab1">Tab</TabsTrigger></TabsList>\n  <TabsContent value="tab1">Content</TabsContent>\n</Tabs>', description: 'Tabbed content navigation' },
+  'textarea': { component: 'Textarea', importPath: "import { Textarea } from '@/ui/textarea';", example: '<Textarea placeholder="Enter text..." rows={4} />', description: 'Multi-line text input' },
+  'toggle-group': { component: 'ToggleGroup', importPath: "import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';", example: '<ToggleGroup type="single">\n  <ToggleGroupItem value="a">A</ToggleGroupItem>\n  <ToggleGroupItem value="b">B</ToggleGroupItem>\n</ToggleGroup>', description: 'Group of mutually exclusive toggles' },
+  'toggle': { component: 'Toggle', importPath: "import { Toggle } from '@/ui/toggle';", variants: ['default', 'outline'], example: '<Toggle>Bold</Toggle>', description: 'Togglable button state' },
+  'tooltip': { component: 'Tooltip', importPath: "import { Tooltip, TooltipTrigger, TooltipContent } from '@/ui/tooltip';", example: '<Tooltip>\n  <TooltipTrigger>Hover me</TooltipTrigger>\n  <TooltipContent>Helpful text</TooltipContent>\n</Tooltip>', description: 'Hover information overlay' },
+};
+
+// Pre-sorted longest-key-first for substring matching — prevents "button" from
+// stealing matches that belong to the more-specific "button-group".
+const ASTRO_SORTED_KEYS = Object.entries(ASTRO_COMPONENT_MAP)
+  .sort((a, b) => b[0].replace(/[-_]/g, '').length - a[0].replace(/[-_]/g, '').length);
+
+function matchComponentName(name: string): (typeof ASTRO_COMPONENT_MAP[string] & { matchedKey: string }) | null {
+  // Strip hyphens/spaces/slashes so "Button Group", "button-group", "ButtonGroup" all normalize to "buttongroup"
+  const lower = name.toLowerCase().replace(/[-_\s\/]/g, '');
+  // Check longer keys first (toggle-group before toggle, button-group before button, etc.)
+  for (const [key, info] of ASTRO_SORTED_KEYS) {
+    const keyNorm = key.replace(/[-_]/g, '');
+    if (lower === keyNorm || lower.includes(keyNorm)) {
+      return { ...info, matchedKey: key };
+    }
+  }
+  return null;
+}
+
+type ComponentMatchResult = (typeof ASTRO_COMPONENT_MAP[string] & { matchedKey: string }) | null;
+
+function getComponentMap(nodes: ReadonlyArray<SceneNode>): Array<{
+  figmaName: string; nodeId: string; nodeType: string;
+  match: ComponentMatchResult;
+}> {
+  const seen = new Set<string>();
+  const results: Array<{ figmaName: string; nodeId: string; nodeType: string; match: ComponentMatchResult }> = [];
+
+  const effectiveName = (node: BaseNode): string => {
+    if (node.type === 'INSTANCE') {
+      const mc = (node as InstanceNode).mainComponent;
+      if (mc) {
+        const parent = mc.parent;
+        if (parent && parent.type === 'COMPONENT_SET') return parent.name;
+        return mc.name;
+      }
+      return (node as SceneNode).name;
+    }
+    if (node.type === 'COMPONENT') {
+      const parent = (node as ComponentNode).parent;
+      if (parent && parent.type === 'COMPONENT_SET') return parent.name;
+      return node.name;
+    }
+    return (node as SceneNode).name;
+  };
+
+  const visit = (node: BaseNode) => {
+    const isComponent = node.type === 'COMPONENT' || node.type === 'COMPONENT_SET' || node.type === 'INSTANCE';
+    const isFrame = node.type === 'FRAME';
+    if (isComponent || isFrame) {
+      const rawName = effectiveName(node);
+      const nameKey = rawName.toLowerCase();
+      const match = matchComponentName(rawName);
+      if (!seen.has(nameKey) && (isComponent || match)) {
+        seen.add(nameKey);
+        results.push({ figmaName: rawName, nodeId: node.id, nodeType: node.type, match });
+      }
+    }
+    if ('children' in node && node.type !== 'INSTANCE') {
+      for (const child of (node as ChildrenMixin).children) visit(child);
+    }
+  };
+
+  for (const node of nodes) visit(node);
+  return results;
+}
+
+// ── End feature functions ───────────────────────────────────────────────────
 
 figma.ui.onmessage = async (msg) => {
   if (msg.type === 'get-dashboard-data') {
@@ -795,9 +1383,119 @@ figma.ui.onmessage = async (msg) => {
     });
   }
 
+  if (msg.type === 'page-audit') {
+    try { await runPageAudit(); } catch (error) { figma.ui.postMessage({ type: 'error', error: String(error) }); }
+    return;
+  }
+
+  if (msg.type === 'find-unused-variables') {
+    try {
+      const result = await findUnusedVariables();
+      figma.ui.postMessage({ type: 'unused-variables-result', ...result });
+    } catch (error) { figma.ui.postMessage({ type: 'error', error: String(error) }); }
+    return;
+  }
+
+  if (msg.type === 'delete-variables') {
+    try {
+      const ids: string[] = msg.variableIds || [];
+      let deleted = 0;
+      for (const id of ids) {
+        try { const v = figma.variables.getVariableById(id); if (v) { v.remove(); deleted++; } } catch {}
+      }
+      figma.notify(`Deleted ${deleted} variable${deleted !== 1 ? 's' : ''}`);
+      const result = await findUnusedVariables();
+      figma.ui.postMessage({ type: 'unused-variables-result', ...result });
+    } catch (error) { figma.ui.postMessage({ type: 'error', error: String(error) }); }
+    return;
+  }
+
+  if (msg.type === 'export-component-tokens') {
+    try {
+      const selection = figma.currentPage.selection;
+      if (selection.length === 0) {
+        figma.ui.postMessage({ type: 'component-tokens-result', groups: [], selectionName: '' });
+        return;
+      }
+      const groups = selection.map(node => ({
+        name: node.name,
+        nodeId: node.id,
+        tokens: collectComponentTokens([node])
+      }));
+      const selectionName = selection.length === 1 ? selection[0].name : `${selection.length} components`;
+      figma.ui.postMessage({ type: 'component-tokens-result', groups, selectionName });
+    } catch (error) { figma.ui.postMessage({ type: 'error', error: String(error) }); }
+    return;
+  }
+
+  if (msg.type === 'get-component-map') {
+    try {
+      const selection = figma.currentPage.selection;
+      const source = selection.length > 0 ? selection : figma.currentPage.children;
+      const components = getComponentMap(source as ReadonlyArray<SceneNode>);
+      figma.ui.postMessage({ type: 'component-map-result', components, scannedPage: selection.length === 0 });
+    } catch (error) { figma.ui.postMessage({ type: 'error', error: String(error) }); }
+    return;
+  }
+
+  if (msg.type === 'navigate-to-node') {
+    try {
+      const node = figma.getNodeById(msg.nodeId);
+      if (node && node.type !== 'DOCUMENT' && node.type !== 'PAGE') {
+        const sceneNode = node as SceneNode;
+        if (sceneNode.parent && 'type' in sceneNode.parent) {
+          figma.currentPage.selection = [sceneNode];
+          figma.viewport.scrollAndZoomIntoView([sceneNode]);
+        }
+      }
+    } catch {}
+    return;
+  }
+
+  if (msg.type === 'activate-inspect') {
+    inspectScreenActive = true;
+    await runSelectionCheck();
+    return;
+  }
+
+  if (msg.type === 'deactivate-inspect') {
+    inspectScreenActive = false;
+    return;
+  }
+
+  if (msg.type === 'check-selection') {
+    if (msg.themeName) currentThemeName = msg.themeName;
+    await runSelectionCheck();
+    return;
+  }
+
+  if (msg.type === 'fix-issue') {
+    try {
+      await fixSingleIssue(msg.nodeId, msg.propertyRaw, msg.status, msg.variableName, currentThemeName);
+      await runSelectionCheck();
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
+    }
+    return;
+  }
+
+  if (msg.type === 'fix-all-issues') {
+    try {
+      const fixes: any[] = msg.fixes || [];
+      for (const fix of fixes) {
+        try { await fixSingleIssue(fix.nodeId, fix.propertyRaw, fix.status, fix.variableName, currentThemeName); } catch {}
+      }
+      await runSelectionCheck();
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
+    }
+    return;
+  }
+
   if (msg.type === 'apply-theme') {
     try {
       const themeName: string = msg.themeName;
+      currentThemeName = themeName;
       const lightBlock = buildThemeBlock(themeName, 'light');
       const darkBlock = buildThemeBlock(themeName, 'dark');
 
@@ -807,6 +1505,7 @@ figma.ui.onmessage = async (msg) => {
 
       const collections = await figma.variables.getLocalVariableCollectionsAsync();
       let updated = 0;
+      let darkModeBlocked = false;
       const unmatched: string[] = [];
       const tokenNames = Object.keys(lightBlock);
 
@@ -842,12 +1541,22 @@ figma.ui.onmessage = async (msg) => {
           const lightRgb = colorValueToRgb(lightBlock[tokenName]);
           const darkRgb = colorValueToRgb(darkBlock[tokenName] || lightBlock[tokenName]);
 
+          const firstModeId = collection.modes[0].modeId;
           for (const { variable } of matching) {
             if (lightRgb) {
-              for (const modeId of lightModes) variable.setValueForMode(modeId, lightRgb);
+              let wroteLight = false;
+              for (const modeId of lightModes) {
+                try { variable.setValueForMode(modeId, lightRgb); wroteLight = true; } catch {}
+              }
+              // Free-plan fallback: if the named light mode was inaccessible, write to mode[0]
+              if (!wroteLight) {
+                try { variable.setValueForMode(firstModeId, lightRgb); } catch {}
+              }
             }
             if (darkRgb) {
-              for (const modeId of darkModes) variable.setValueForMode(modeId, darkRgb);
+              for (const modeId of darkModes) {
+                try { variable.setValueForMode(modeId, darkRgb); } catch { darkModeBlocked = true; }
+              }
             }
             updated++;
           }
@@ -933,11 +1642,12 @@ figma.ui.onmessage = async (msg) => {
 
       const parts: string[] = [updated + ' color variable' + (updated !== 1 ? 's' : '')];
       if (radiusUpdated > 0) parts.push(radiusUpdated + ' radius variable' + (radiusUpdated !== 1 ? 's' : ''));
+      if (darkModeBlocked) parts.push('dark mode skipped (free plan)');
       figma.notify('Applied "' + themeName + '" — ' + parts.join(', '));
       figma.ui.postMessage({
         type: 'apply-theme-complete',
         updated, radiusUpdated, radiusFailed, radiusFloatCount, radiusNameMatched,
-        radiusSamples, radiusFailures, floatSamples, unmatched
+        radiusSamples, radiusFailures, floatSamples, unmatched, darkModeBlocked
       });
     } catch (error) {
       figma.ui.postMessage({ type: 'error', error: String(error) });

@@ -463,6 +463,130 @@
       border: 1px solid rgba(0,0,0,0.1);
       flex-shrink: 0;
     }
+    .inspect-node-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+    .inspect-node-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-subtle);
+    }
+    .inspect-node-path {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 400;
+      margin-left: auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 160px;
+    }
+    .inspect-issue-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      border-bottom: 1px solid var(--border);
+    }
+    .inspect-issue-row:last-child { border-bottom: none; }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.hardcoded { background: #ef4444; }
+    .status-dot.mismatch  { background: #f59e0b; }
+    .status-dot.ok        { background: #22c55e; }
+    .color-chip {
+      width: 16px;
+      height: 16px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.15);
+      flex-shrink: 0;
+    }
+    .inspect-summary {
+      display: flex;
+      gap: 12px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 11px;
+    }
+    .summary-pill {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-weight: 600;
+    }
+    .inspect-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 12px;
+      gap: 8px;
+    }
+    .inspect-fix-btn {
+      margin-left: auto;
+      flex-shrink: 0;
+      padding: 3px 10px;
+      font-size: 10px;
+      font-weight: 600;
+      border-radius: 4px;
+      cursor: pointer;
+      border: 1px solid var(--border-input);
+      background: var(--surface);
+      color: var(--accent);
+      transition: all 0.15s;
+    }
+    .inspect-fix-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+    .inspect-fix-all-btn {
+      margin-left: auto;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 5px;
+      cursor: pointer;
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: white;
+      transition: opacity 0.15s;
+    }
+    .inspect-fix-all-btn:hover { opacity: 0.85; }
+    details > summary { list-style: none; cursor: pointer; user-select: none; }
+    details > summary::-webkit-details-marker { display: none; }
+    .inspect-accordion-summary {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+    }
+    .inspect-accordion-summary .chevron {
+      font-size: 9px;
+      display: inline-block;
+      transition: transform 0.15s;
+    }
+    details[open] > summary .chevron { transform: rotate(90deg); }
   </style>
 </head>
 <body>
@@ -583,6 +707,30 @@
             <span class="action-icon">✨</span>
             <span>Create</span>
             <span style="margin-left: auto; background: #434343; color: #BBBBBB; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">NEW</span>
+          </button>
+
+          <button class="action-button" onclick="showInspectScreen()">
+            <span class="action-icon">🔍</span>
+            <span>Inspect component</span>
+            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
+          </button>
+
+          <button class="action-button" onclick="showAuditScreen()">
+            <span class="action-icon">📊</span>
+            <span>Page audit</span>
+            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
+          </button>
+
+          <button class="action-button" onclick="showUnusedVarsScreen()">
+            <span class="action-icon">🗑️</span>
+            <span>Unused variables</span>
+            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
+          </button>
+
+          <button class="action-button" onclick="showDevToolsScreen()">
+            <span class="action-icon">👩‍💻</span>
+            <span>Dev tools</span>
+            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
           </button>
         </div>
       `;
@@ -1783,6 +1931,613 @@
       `;
     }
 
+    var _inspectFixData = [];
+
+    function navigateToNode(nodeId) {
+      parent.postMessage({ pluginMessage: { type: 'navigate-to-node', nodeId: nodeId } }, '*');
+    }
+
+    function fixIssue(fixIndex) {
+      var data = _inspectFixData[fixIndex];
+      if (!data) return;
+      parent.postMessage({ pluginMessage: Object.assign({ type: 'fix-issue' }, data) }, '*');
+    }
+
+    function fixAll() {
+      var problemFixes = _inspectFixData.filter(function(d) { return d.status !== 'ok'; });
+      if (!problemFixes.length) return;
+      parent.postMessage({ pluginMessage: { type: 'fix-all-issues', fixes: problemFixes } }, '*');
+    }
+
+    // ── Inspect screen ──────────────────────────────────────────────────────
+
+    function showInspectScreen() {
+      document.getElementById('root').innerHTML = `
+        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
+          <div class="screen-header">
+            <div class="back-icon" onclick="leaveInspectScreen()">←</div>
+            <div>
+              <p class="screen-title">Inspect component</p>
+              <p class="screen-subtitle" id="inspect-subtitle">Select a component on the canvas</p>
+            </div>
+          </div>
+          <div id="inspect-body" style="flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
+            <div class="inspect-empty">
+              <div style="font-size: 32px;">🔍</div>
+              <div>Select any component, frame, or layer on the canvas</div>
+              <div style="font-size: 11px; color: var(--text-muted);">
+                ${_selectedTheme ? 'Checking against theme: <strong>' + _selectedTheme + '</strong>' : 'No theme selected — will only check for hardcoded colors'}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      parent.postMessage({ pluginMessage: { type: 'activate-inspect', themeName: _selectedTheme } }, '*');
+    }
+
+    function leaveInspectScreen() {
+      parent.postMessage({ pluginMessage: { type: 'deactivate-inspect' } }, '*');
+      showDashboard();
+    }
+
+    function issueRowHtml(iss, nodeId) {
+      var dot = '<span class="status-dot ' + iss.status + '"></span>';
+      var isColor = iss.category === 'color' || !iss.category;
+      var isSpacing = iss.category === 'spacing';
+      var chip = isColor && iss.colorHex ? '<span class="color-chip" style="background:' + iss.colorHex + ';"></span>' : '';
+      var fixBtn = '';
+      if (iss.status !== 'ok' && iss.category !== 'typography') {
+        var fixIndex = _inspectFixData.length;
+        _inspectFixData.push({ nodeId: nodeId, propertyRaw: iss.property, status: iss.status, variableName: iss.variableName || '' });
+        fixBtn = '<button type="button" class="inspect-fix-btn" onclick="fixIssue(' + fixIndex + ')">Fix</button>';
+      }
+      var label = '';
+      if (iss.status === 'hardcoded') {
+        if (isSpacing) {
+          label = '<span style="color:var(--text-secondary);">' + iss.property + '</span> ' +
+                  '<span style="font-family:monospace;color:var(--text-primary);">' + iss.currentValue + '</span> ' +
+                  '<span style="color:#ef4444;font-weight:600;">hardcoded</span>';
+        } else if (!isColor) {
+          label = '<span style="color:var(--text-secondary);">no text style · </span>' +
+                  '<span style="font-family:monospace;color:var(--text-muted);">' + (iss.currentValue || '') + '</span> ' +
+                  '<span style="color:#ef4444;font-weight:600;">missing</span>';
+        } else {
+          label = '<span style="color:var(--text-secondary);">' + iss.property + '</span> ' +
+                  '<span style="font-family:monospace;color:var(--text-primary);">' + iss.colorHex + '</span> ' +
+                  '<span style="color:#ef4444;font-weight:600;">hardcoded</span>';
+        }
+      } else if (iss.status === 'mismatch') {
+        var expChip = iss.expectedHex ? '<span class="color-chip" style="background:' + iss.expectedHex + ';"></span>' : '';
+        label = '<span style="color:var(--text-secondary);">' + iss.property + '</span> ' +
+                chip + '<span style="color:var(--text-muted);margin:0 4px;">→</span>' + expChip + ' ' +
+                '<span style="color:#f59e0b;font-weight:600;">wrong value</span>' +
+                (iss.variableName ? ' <span style="color:var(--text-muted);">(' + iss.variableName + ')</span>' : '');
+      } else {
+        if (isSpacing) {
+          label = '<span style="color:var(--text-secondary);">' + iss.property + '</span> ' +
+                  '<span style="font-family:monospace;color:var(--text-primary);">' + iss.currentValue + '</span> ' +
+                  '<span style="color:#22c55e;font-weight:600;">bound</span>' +
+                  (iss.variableName ? ' <span style="color:var(--text-muted);">(' + iss.variableName + ')</span>' : '');
+        } else if (!isColor) {
+          label = '<span style="color:var(--text-secondary);">textStyle</span> ' +
+                  '<span style="color:#22c55e;font-weight:600;">applied</span>' +
+                  (iss.variableName ? ' <span style="color:var(--text-muted);">(' + iss.variableName + ')</span>' : '');
+        } else {
+          var expChip2 = iss.expectedHex ? '<span class="color-chip" style="background:' + iss.expectedHex + ';"></span>' : chip;
+          label = '<span style="color:var(--text-secondary);">' + iss.property + '</span> ' +
+                  expChip2 + ' ' +
+                  '<span style="color:#22c55e;font-weight:600;">' + (iss.tokenName || 'ok') + '</span>' +
+                  (iss.variableName ? ' <span style="color:var(--text-muted);">(' + iss.variableName + ')</span>' : '');
+        }
+      }
+      return '<div class="inspect-issue-row">' + dot + chip + '<span style="flex:1;line-height:1.4;">' + label + '</span>' + fixBtn + '</div>';
+    }
+
+    function nodeCardHtml(node) {
+      var typeIcon = node.nodeType === 'COMPONENT' ? '◈' :
+                     node.nodeType === 'INSTANCE'  ? '◇' :
+                     node.nodeType === 'FRAME'     ? '▭' :
+                     node.nodeType === 'TEXT'      ? 'T' : '·';
+
+      var problemIssues = node.issues.filter(function(i) { return i.status !== 'ok'; });
+      var okIssues      = node.issues.filter(function(i) { return i.status === 'ok'; });
+
+      var header = '<div class="inspect-node-header">' +
+        '<span style="color:var(--text-muted);font-size:11px;font-weight:700;">' + typeIcon + '</span>' +
+        '<span>' + node.nodeName + '</span>' +
+        '<span class="inspect-node-path" style="margin-right:4px;">' + node.path + '</span>' +
+        '<button onclick="navigateToNode(\'' + node.nodeId + '\')" title="Select in Figma" style="flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--accent);font-size:10px;padding:2px 6px;font-weight:700;line-height:1.3;transition:all 0.15s;" onmouseover="this.style.background=\'var(--accent)\';this.style.color=\'white\'" onmouseout="this.style.background=\'var(--surface)\';this.style.color=\'var(--accent)\'">↗</button>' +
+        '</div>';
+
+      var problemRows = problemIssues.map(function(iss) { return issueRowHtml(iss, node.nodeId); }).join('');
+
+      var okAccordion = '';
+      if (okIssues.length > 0) {
+        okAccordion = '<details>' +
+          '<summary class="inspect-accordion-summary">' +
+            '<span class="chevron">▸</span>' +
+            '<span class="status-dot ok"></span>' +
+            okIssues.length + ' correct value' + (okIssues.length !== 1 ? 's' : '') +
+          '</summary>' +
+          okIssues.map(function(iss) { return issueRowHtml(iss, node.nodeId); }).join('') +
+        '</details>';
+      }
+
+      return '<div class="inspect-node-card">' + header + problemRows + okAccordion + '</div>';
+    }
+
+    function renderInspectResults(msg) {
+      var body = document.getElementById('inspect-body');
+      var subtitle = document.getElementById('inspect-subtitle');
+      if (!body) return;
+
+      if (msg.empty) {
+        if (subtitle) subtitle.textContent = 'Select a component on the canvas';
+        body.innerHTML = '<div class="inspect-empty">' +
+          '<div style="font-size:32px;">🔍</div>' +
+          '<div>Select any component, frame, or layer on the canvas</div>' +
+          (msg.themeName ? '<div style="font-size:11px;color:var(--text-muted);">Checking against: <strong>' + msg.themeName + '</strong></div>' : '') +
+          '</div>';
+        return;
+      }
+
+      var nodes = msg.nodes || [];
+      var totalScanned = msg.totalScanned || 0;
+
+      _inspectFixData = [];
+
+      var hardcoded = 0, mismatched = 0, ok = 0;
+      var spacingHardcoded = 0, typoHardcoded = 0;
+      nodes.forEach(function(n) {
+        n.issues.forEach(function(iss) {
+          if (iss.status === 'hardcoded') {
+            hardcoded++;
+            if (iss.category === 'spacing') spacingHardcoded++;
+            else if (iss.category === 'typography') typoHardcoded++;
+          } else if (iss.status === 'mismatch') mismatched++;
+          else ok++;
+        });
+      });
+
+      if (subtitle) {
+        subtitle.textContent = totalScanned + ' layer' + (totalScanned !== 1 ? 's' : '') + ' scanned' +
+          (msg.themeName ? ' · ' + msg.themeName : '');
+      }
+
+      var nodesWithProblems = nodes.filter(function(n) {
+        return n.issues.some(function(i) { return i.status !== 'ok'; });
+      });
+      var nodesAllOk = nodes.filter(function(n) {
+        return n.issues.length > 0 && n.issues.every(function(i) { return i.status === 'ok'; });
+      });
+
+      var colorHardcoded = hardcoded - spacingHardcoded - typoHardcoded;
+      var fixableProblems = hardcoded - typoHardcoded + mismatched;
+      var summary = '<div class="inspect-summary">' +
+        (colorHardcoded > 0 ? '<span class="summary-pill"><span class="status-dot hardcoded"></span>' + colorHardcoded + ' color</span>' : '') +
+        (mismatched > 0 ? '<span class="summary-pill"><span class="status-dot mismatch"></span>' + mismatched + ' wrong value</span>' : '') +
+        (spacingHardcoded > 0 ? '<span class="summary-pill"><span class="status-dot hardcoded"></span>' + spacingHardcoded + ' spacing</span>' : '') +
+        (typoHardcoded > 0 ? '<span class="summary-pill"><span class="status-dot hardcoded"></span>' + typoHardcoded + ' text style</span>' : '') +
+        (ok > 0 ? '<span class="summary-pill"><span class="status-dot ok"></span>' + ok + ' correct</span>' : '') +
+        (fixableProblems > 1 ? '<button type="button" class="inspect-fix-all-btn" onclick="fixAll()">Fix all (' + fixableProblems + ')</button>' : '') +
+        '</div>';
+
+      if (hardcoded === 0 && mismatched === 0) {
+        // All correct — show everything in one big accordion
+        var allRows = nodes.map(nodeCardHtml).join('');
+        body.innerHTML = summary +
+          '<details>' +
+            '<summary class="inspect-accordion-summary" style="border:1px solid var(--border);border-radius:8px;">' +
+              '<span class="chevron">▸</span>' +
+              '<span class="status-dot ok"></span>' +
+              'All ' + ok + ' values correct — expand to review' +
+            '</summary>' +
+            allRows +
+          '</details>';
+        return;
+      }
+
+      var problemCards = nodesWithProblems.map(nodeCardHtml).join('');
+
+      var okSection = '';
+      if (nodesAllOk.length > 0) {
+        var okCount = nodesAllOk.reduce(function(s, n) { return s + n.issues.length; }, 0);
+        okSection = '<details style="margin-top:8px;">' +
+          '<summary class="inspect-accordion-summary" style="border:1px solid var(--border);border-radius:8px;">' +
+            '<span class="chevron">▸</span>' +
+            '<span class="status-dot ok"></span>' +
+            nodesAllOk.length + ' fully correct layer' + (nodesAllOk.length !== 1 ? 's' : '') +
+            ' (' + okCount + ' value' + (okCount !== 1 ? 's' : '') + ')' +
+          '</summary>' +
+          nodesAllOk.map(nodeCardHtml).join('') +
+        '</details>';
+      }
+
+      body.innerHTML = summary + problemCards + okSection;
+    }
+
+    // ── Page Audit Screen ────────────────────────────────────────────────────
+
+    function showAuditScreen() {
+      document.getElementById('root').innerHTML = `
+        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">Page audit</p>
+              <p class="screen-subtitle" id="audit-subtitle">Scanning…</p>
+            </div>
+          </div>
+          <div id="audit-body" style="flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
+            <div class="inspect-empty">
+              <div style="font-size: 32px; display: inline-block; animation: spin 1s linear infinite;">⏳</div>
+              <div>Scanning all layers on this page…</div>
+            </div>
+          </div>
+        </div>
+      `;
+      parent.postMessage({ pluginMessage: { type: 'page-audit' } }, '*');
+    }
+
+    function renderAuditResults(msg) {
+      var body = document.getElementById('audit-body');
+      var subtitle = document.getElementById('audit-subtitle');
+      if (!body) return;
+
+      if (subtitle) {
+        subtitle.textContent = (msg.totalScanned || 0) + ' layers scanned' + (msg.themeName ? ' · ' + msg.themeName : '');
+      }
+
+      var score = msg.score || 0;
+      var scoreColor = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444';
+      var scoreLabel = score >= 80 ? 'Healthy' : score >= 60 ? 'Needs work' : 'Critical';
+      var bc = msg.byCategory || { color: {}, spacing: {}, typography: {} };
+
+      _inspectFixData = [];
+      var nodes = msg.nodes || [];
+      var nodesWithProblems = nodes.filter(function(n) {
+        return n.issues.some(function(i) { return i.status !== 'ok'; });
+      });
+
+      var scoreHtml = '<div style="display:flex;align-items:center;gap:16px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;">' +
+        '<div style="text-align:center;flex-shrink:0;min-width:64px;">' +
+          '<div style="font-size:34px;font-weight:700;color:' + scoreColor + ';line-height:1;">' + score + '%</div>' +
+          '<div style="font-size:9px;font-weight:700;color:' + scoreColor + ';text-transform:uppercase;letter-spacing:0.5px;">' + scoreLabel + '</div>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;flex:1;">' +
+          (bc.color && bc.color.hardcoded ? '<div style="font-size:11px;"><span class="status-dot hardcoded" style="display:inline-block;margin-right:4px;"></span>' + bc.color.hardcoded + ' hardcoded colors</div>' : '') +
+          (bc.color && bc.color.mismatch ? '<div style="font-size:11px;"><span class="status-dot mismatch" style="display:inline-block;margin-right:4px;"></span>' + bc.color.mismatch + ' wrong values</div>' : '') +
+          (bc.spacing && bc.spacing.hardcoded ? '<div style="font-size:11px;"><span class="status-dot hardcoded" style="display:inline-block;margin-right:4px;"></span>' + bc.spacing.hardcoded + ' hardcoded spacing</div>' : '') +
+          (bc.typography && bc.typography.hardcoded ? '<div style="font-size:11px;"><span class="status-dot hardcoded" style="display:inline-block;margin-right:4px;"></span>' + bc.typography.hardcoded + ' missing text styles</div>' : '') +
+          '<div style="font-size:11px;"><span class="status-dot ok" style="display:inline-block;margin-right:4px;"></span>' + (msg.ok || 0) + ' correct</div>' +
+        '</div>' +
+      '</div>';
+
+      if (nodesWithProblems.length === 0) {
+        body.innerHTML = scoreHtml +
+          '<div class="inspect-empty" style="padding:24px 20px;">' +
+            '<div style="font-size:32px;">✅</div>' +
+            '<div>All layers are compliant!</div>' +
+          '</div>';
+        return;
+      }
+
+      var fixableProblems = 0;
+      nodes.forEach(function(n) {
+        n.issues.forEach(function(i) { if (i.status !== 'ok' && i.category !== 'typography') fixableProblems++; });
+      });
+
+      var summaryRow = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+        '<span style="font-size:11px;font-weight:600;color:var(--text-secondary);">' + nodesWithProblems.length + ' problem layer' + (nodesWithProblems.length !== 1 ? 's' : '') + '</span>' +
+        (fixableProblems > 1 ? '<button type="button" class="inspect-fix-all-btn" onclick="fixAll()" style="margin-left:auto;">Fix all (' + fixableProblems + ')</button>' : '') +
+        '</div>';
+
+      var shown = nodesWithProblems.slice(0, 100);
+      body.innerHTML = scoreHtml + summaryRow + shown.map(nodeCardHtml).join('') +
+        (nodesWithProblems.length > 100 ? '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Showing 100 of ' + nodesWithProblems.length + ' problem layers</div>' : '');
+    }
+
+    // ── Unused Variables Screen ───────────────────────────────────────────────
+
+    var _unusedVariables = [];
+
+    function showUnusedVarsScreen() {
+      document.getElementById('root').innerHTML = `
+        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">Unused variables</p>
+              <p class="screen-subtitle">Variables not referenced anywhere in this file</p>
+            </div>
+          </div>
+          <div id="unused-body" style="flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
+            <div class="inspect-empty">
+              <div style="font-size: 32px; display: inline-block; animation: spin 1s linear infinite;">⏳</div>
+              <div>Scanning all pages…</div>
+            </div>
+          </div>
+          <div id="unused-action-bar" style="display: none; background-color: var(--bg); padding: 12px 0;">
+            <button class="button-primary" id="delete-unused-btn" onclick="deleteSelectedUnused()" style="margin-top: 0; background: #ef4444;">Delete selected</button>
+          </div>
+        </div>
+      `;
+      _unusedVariables = [];
+      parent.postMessage({ pluginMessage: { type: 'find-unused-variables' } }, '*');
+    }
+
+    function renderUnusedVars(msg) {
+      var body = document.getElementById('unused-body');
+      if (!body) return;
+      _unusedVariables = msg.unused || [];
+      var total = msg.total || 0;
+
+      if (_unusedVariables.length === 0) {
+        body.innerHTML = '<div class="inspect-empty" style="padding:40px 20px;">' +
+          '<div style="font-size:32px;">✅</div>' +
+          '<div>No unused variables!</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);">All ' + total + ' variables are referenced in the file.</div>' +
+          '</div>';
+        var bar = document.getElementById('unused-action-bar');
+        if (bar) bar.style.display = 'none';
+        return;
+      }
+
+      var byCollection = {};
+      _unusedVariables.forEach(function(v) {
+        if (!byCollection[v.collection]) byCollection[v.collection] = [];
+        byCollection[v.collection].push(v);
+      });
+
+      var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">' +
+        _unusedVariables.length + ' of ' + total + ' variables unused</div>';
+      html += '<label style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;cursor:pointer;">' +
+        '<input type="checkbox" id="select-all-unused" onchange="toggleAllUnused(this.checked)" style="width:13px;height:13px;accent-color:#ef4444;" />' +
+        'Select all' +
+        '</label>';
+
+      for (var colName in byCollection) {
+        html += '<div style="margin-bottom:4px;margin-top:8px;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">' + colName + '</div>';
+        html += byCollection[colName].map(function(v) {
+          var swatch = v.type === 'COLOR' ? '<span class="color-swatch" style="background:' + v.value + ';width:12px;height:12px;"></span>' : '';
+          return '<div class="variable-row" style="cursor:default;padding:6px 10px;">' +
+            '<input type="checkbox" class="unused-cb" data-id="' + v.id + '" onchange="updateUnusedActionBar()" style="width:13px;height:13px;accent-color:#ef4444;flex-shrink:0;" />' +
+            '<span class="var-type-badge var-type-' + v.type + '">' + (v.type === 'FLOAT' ? 'NUM' : v.type.slice(0,3)) + '</span>' +
+            swatch +
+            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + v.name + '</span>' +
+            '<span style="color:var(--text-muted);font-size:11px;flex-shrink:0;font-family:monospace;">' + v.value + '</span>' +
+            '</div>';
+        }).join('');
+      }
+
+      body.innerHTML = html;
+      updateUnusedActionBar();
+    }
+
+    function toggleAllUnused(checked) {
+      document.querySelectorAll('.unused-cb').forEach(function(cb) { cb.checked = checked; });
+      updateUnusedActionBar();
+    }
+
+    function updateUnusedActionBar() {
+      var checked = document.querySelectorAll('.unused-cb:checked').length;
+      var bar = document.getElementById('unused-action-bar');
+      var btn = document.getElementById('delete-unused-btn');
+      if (!bar) return;
+      bar.style.display = checked > 0 ? 'block' : 'none';
+      if (btn) btn.textContent = 'Delete ' + checked + ' variable' + (checked !== 1 ? 's' : '');
+    }
+
+    function deleteSelectedUnused() {
+      var ids = Array.from(document.querySelectorAll('.unused-cb:checked')).map(function(cb) { return cb.dataset.id; });
+      if (!ids.length) return;
+      if (!confirm('Delete ' + ids.length + ' variable' + (ids.length !== 1 ? 's' : '') + '? This cannot be undone.')) return;
+      parent.postMessage({ pluginMessage: { type: 'delete-variables', variableIds: ids } }, '*');
+      var body = document.getElementById('unused-body');
+      if (body) body.innerHTML = '<div class="inspect-empty"><div style="font-size:32px;">⏳</div><div>Deleting…</div></div>';
+    }
+
+    // ── Dev Tools Screen ─────────────────────────────────────────────────────
+
+    function showDevToolsScreen() {
+      document.getElementById('root').innerHTML = `
+        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">Dev tools</p>
+              <p class="screen-subtitle">Bridge between Figma and Astro code</p>
+            </div>
+          </div>
+          <div style="flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
+
+            <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Component token export</div>
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px;">
+              <div style="font-size:12px;color:var(--text-body);margin-bottom:10px;line-height:1.5;">Select a component or frame on the canvas, then export all design token values it uses — ready to hand off to developers.</div>
+              <button class="button-primary" style="margin-top:0;" onclick="loadComponentTokens()">Export tokens for selection</button>
+              <div id="component-tokens-body" style="margin-top:10px;"></div>
+            </div>
+
+            <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Astro component map</div>
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;">
+              <div style="font-size:12px;color:var(--text-body);margin-bottom:10px;line-height:1.5;">Name your Figma components, component sets, or frames after Astro components (e.g. <code style="background:var(--surface-subtle);padding:1px 4px;border-radius:3px;">Button</code>, <code style="background:var(--surface-subtle);padding:1px 4px;border-radius:3px;">Card</code>, <code style="background:var(--surface-subtle);padding:1px 4px;border-radius:3px;">Input</code>), then click Detect. Each matched result shows the import path, usage example, and which keyword was matched.</div>
+              <button class="button-primary" style="margin-top:0;" onclick="loadComponentMap()">Detect components</button>
+              <div id="component-map-body" style="margin-top:10px;"></div>
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    function loadComponentTokens() {
+      var body = document.getElementById('component-tokens-body');
+      if (body) body.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:4px 0;">Loading…</div>';
+      parent.postMessage({ pluginMessage: { type: 'export-component-tokens' } }, '*');
+    }
+
+    function hideComponentTokens() {
+      var b = document.getElementById('component-tokens-body');
+      if (b) b.innerHTML = '';
+    }
+
+    function renderComponentTokens(msg) {
+      var body = document.getElementById('component-tokens-body');
+      if (!body) return;
+      var groups = msg.groups || [];
+
+      if (groups.length === 0) {
+        body.innerHTML = '<div style="color:var(--text-muted);font-size:11px;">' +
+          (msg.selectionName === '' ? 'No selection — select a component first.' : 'No bound tokens found.') + '</div>';
+        return;
+      }
+
+      var combinedJson = {};
+      var totalTokens = 0;
+      groups.forEach(function(g) {
+        if (groups.length === 1) {
+          g.tokens.forEach(function(t) { combinedJson[t.name] = t.value; });
+        } else {
+          var obj = {};
+          g.tokens.forEach(function(t) { obj[t.name] = t.value; });
+          combinedJson[g.name] = obj;
+        }
+        totalTokens += g.tokens.length;
+      });
+      var jsonStr = JSON.stringify(combinedJson, null, 2);
+
+      function tokenRowsHtml(tokens) {
+        return tokens.map(function(t) {
+          var swatch = t.type === 'COLOR' ? '<span class="color-swatch" style="background:' + escHtml(t.value) + ';width:12px;height:12px;"></span>' : '';
+          return '<div style="display:flex;align-items:center;gap:6px;padding:5px 10px;font-size:11px;border-bottom:1px solid var(--border);">' +
+            '<span class="var-type-badge var-type-' + t.type + '">' + (t.type === 'FLOAT' ? 'NUM' : t.type.slice(0,3)) + '</span>' +
+            swatch +
+            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary);">' + escHtml(t.name) + '</span>' +
+            '<span style="color:var(--text-muted);font-family:monospace;font-size:10px;">' + escHtml(t.value) + '</span>' +
+            '</div>';
+        }).join('');
+      }
+
+      var label = groups.length > 1
+        ? totalTokens + ' token' + (totalTokens !== 1 ? 's' : '') + ' across ' + groups.length + ' components'
+        : totalTokens + ' token' + (totalTokens !== 1 ? 's' : '') + ' in "' + escHtml(msg.selectionName) + '"';
+
+      var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
+        '<span style="font-size:11px;color:var(--text-muted);">' + label + '</span>' +
+        '<button onclick="hideComponentTokens()" style="font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-muted);cursor:pointer;">Hide</button>' +
+        '</div>';
+
+      if (groups.length === 1) {
+        var g = groups[0];
+        if (g.tokens.length === 0) {
+          html += '<div style="color:var(--text-muted);font-size:11px;padding:4px 0;">No bound tokens found in "' + escHtml(g.name) + '".</div>';
+        } else {
+          html += '<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">' + tokenRowsHtml(g.tokens) + '</div>';
+        }
+      } else {
+        groups.forEach(function(g) {
+          if (g.tokens.length === 0) {
+            html += '<div style="padding:4px 0;font-size:11px;color:var(--text-muted);">' + escHtml(g.name) + ': no bound tokens</div>';
+            return;
+          }
+          html += '<details style="margin-bottom:4px;border:1px solid var(--border);border-radius:6px;overflow:hidden;">' +
+            '<summary style="list-style:none;padding:7px 10px;background:var(--surface-subtle);cursor:pointer;font-size:11px;font-weight:600;display:flex;align-items:center;gap:6px;user-select:none;">' +
+              '<span style="flex:1;">' + escHtml(g.name) + '</span>' +
+              '<span style="font-weight:400;color:var(--text-muted);">' + g.tokens.length + ' token' + (g.tokens.length !== 1 ? 's' : '') + '</span>' +
+            '</summary>' +
+            '<div style="max-height:150px;overflow-y:auto;">' + tokenRowsHtml(g.tokens) + '</div>' +
+            '</details>';
+        });
+      }
+
+      html += '<button onclick="downloadTextFile(\'' + btoa(unescape(encodeURIComponent(jsonStr))) + '\', \'component-tokens.json\')" style="margin-top:8px;width:100%;padding:6px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--accent);cursor:pointer;">Download JSON</button>';
+
+      body.innerHTML = html;
+    }
+
+    function downloadTextFile(b64, filename) {
+      try {
+        var str = decodeURIComponent(escape(atob(b64)));
+        var blob = new Blob([str], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      } catch(e) {}
+    }
+
+    function loadComponentMap() {
+      var body = document.getElementById('component-map-body');
+      if (body) body.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:4px 0;">Detecting…</div>';
+      parent.postMessage({ pluginMessage: { type: 'get-component-map' } }, '*');
+    }
+
+    function escHtml(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).catch(function() {});
+    }
+
+    function renderComponentMap(msg) {
+      var body = document.getElementById('component-map-body');
+      if (!body) return;
+      var components = msg.components || [];
+
+      if (components.length === 0) {
+        body.innerHTML = '<div style="color:var(--text-muted);font-size:11px;">' +
+          (msg.scannedPage ? 'No components found on this page.' : 'No components in selection — try selecting a frame or use the whole page.') + '</div>';
+        return;
+      }
+
+      var matched = components.filter(function(c) { return c.match; });
+      var unmatched = components.filter(function(c) { return !c.match; });
+
+      var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">' +
+        matched.length + ' matched · ' + unmatched.length + ' unrecognized' +
+        (msg.scannedPage ? ' <span style="opacity:0.6;">(whole page)</span>' : '') + '</div>';
+
+      matched.forEach(function(c) {
+        var m = c.match;
+        var variantsHtml = m.variants ? '<div style="margin-bottom:6px;font-size:11px;"><span style="color:var(--text-secondary);font-weight:600;">Variants: </span>' +
+          m.variants.map(function(v) { return '<code style="background:var(--pill-bg);padding:1px 5px;border-radius:3px;font-size:10px;">' + v + '</code>'; }).join(' ') + '</div>' : '';
+
+        html += '<details style="margin-bottom:6px;border:1px solid var(--border);border-radius:8px;overflow:hidden;">' +
+          '<summary style="list-style:none;padding:10px 12px;background:var(--surface-subtle);cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;user-select:none;">' +
+            '<span style="color:var(--text-muted);font-size:11px;">◈</span>' +
+            '<span>' + escHtml(c.figmaName) + '</span>' +
+            '<span style="margin-left:auto;font-weight:400;color:var(--accent);font-size:11px;">→ ' + m.component + '</span>' +
+          '</summary>' +
+          '<div style="padding:10px 12px;font-size:11px;">' +
+            '<div style="color:var(--text-muted);margin-bottom:6px;">' + escHtml(m.description) + '</div>' +
+            '<div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;">Matched as: <code style="background:var(--surface-subtle);padding:1px 4px;border-radius:3px;">' + escHtml(m.matchedKey || m.component.toLowerCase()) + '</code> · type: <span style="opacity:0.7;">' + c.nodeType + '</span></div>' +
+            variantsHtml +
+            '<div style="font-weight:600;color:var(--text-secondary);margin-bottom:4px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Import</div>' +
+            '<pre style="margin:0 0 8px;background:var(--surface-subtle);border:1px solid var(--border);border-radius:5px;padding:8px;font-size:10px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;">' + escHtml(m.importPath) + '</pre>' +
+            '<div style="font-weight:600;color:var(--text-secondary);margin-bottom:4px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Usage</div>' +
+            '<pre style="margin:0 0 8px;background:var(--surface-subtle);border:1px solid var(--border);border-radius:5px;padding:8px;font-size:10px;overflow-x:auto;white-space:pre-wrap;">' + escHtml(m.example) + '</pre>' +
+            '<button onclick="copyToClipboard(\'' + m.importPath.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n') + '\\n' + m.example.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n') + '\')" style="font-size:10px;padding:4px 12px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--accent);cursor:pointer;font-weight:600;">Copy code</button>' +
+          '</div>' +
+        '</details>';
+      });
+
+      if (unmatched.length > 0) {
+        html += '<details style="margin-top:4px;border:1px solid var(--border);border-radius:8px;">' +
+          '<summary style="list-style:none;padding:10px 12px;background:var(--surface-subtle);cursor:pointer;font-size:11px;color:var(--text-muted);user-select:none;">' +
+            unmatched.length + ' unrecognized component' + (unmatched.length !== 1 ? 's' : '') +
+          '</summary>' +
+          unmatched.map(function(c) {
+            return '<div style="padding:6px 12px;font-size:11px;border-top:1px solid var(--border);color:var(--text-secondary);">' + escHtml(c.figmaName) + '</div>';
+          }).join('') +
+        '</details>';
+      }
+
+      body.innerHTML = html;
+    }
+
+    // ── End inspect screen ───────────────────────────────────────────────────
+
     window.onmessage = (event) => {
       const msg = event.data.pluginMessage;
       console.log('Message from plugin:', msg);
@@ -1842,6 +2597,16 @@
             (msg.unmatched.length > 8 ? ' (+' + (msg.unmatched.length - 8) + ' more)' : ''));
         }
         alert(lines.join('\n'));
+      } else if (msg.type === 'page-audit-result') {
+        renderAuditResults(msg);
+      } else if (msg.type === 'unused-variables-result') {
+        renderUnusedVars(msg);
+      } else if (msg.type === 'component-tokens-result') {
+        renderComponentTokens(msg);
+      } else if (msg.type === 'component-map-result') {
+        renderComponentMap(msg);
+      } else if (msg.type === 'selection-check-result') {
+        renderInspectResults(msg);
       } else if (msg.type === 'text-styles-data') {
         renderTypography(msg.tokens);
       } else if (msg.type === 'typography-import-complete') {
