@@ -261,7 +261,7 @@
       to { transform: rotate(360deg); }
     }
     .spinning {
-      animation: spin 0.7s linear infinite;
+      animation: spin 0.4s linear infinite;
     }
     .settings-icon {
       position: absolute;
@@ -622,6 +622,8 @@
     let fileName = '';
     let currentVariableCount = 0;
     let githubConfig = null;
+    var _dashboardData = null;
+    var _activeTab = 'designer';
 
     const uploadScreenHTML = document.getElementById('root').innerHTML;
 
@@ -637,101 +639,144 @@
     var _isRefreshing = false;
 
     function refreshDashboard() {
-      const btn = document.getElementById('refresh-btn');
-      if (btn) btn.classList.add('spinning');
+      const icon = document.getElementById('refresh-icon');
+      if (icon) icon.classList.add('spinning');
       _isRefreshing = true;
       parent.postMessage({ pluginMessage: { type: 'get-dashboard-data' } }, '*');
     }
 
     function showRefreshSuccess() {
-      const btn = document.getElementById('refresh-btn');
-      if (!btn) return;
-      btn.classList.remove('spinning');
-      btn.textContent = '✓';
-      btn.style.color = '#22c55e';
-      btn.style.fontWeight = '700';
+      const icon = document.getElementById('refresh-icon');
+      if (!icon) return;
+      icon.classList.remove('spinning');
+      icon.textContent = '✓';
+      icon.style.color = '#22c55e';
+      icon.style.fontWeight = '700';
       setTimeout(function() {
-        btn.textContent = '↻';
-        btn.style.color = '';
-        btn.style.fontWeight = '';
-      }, 1500);
+        icon.textContent = '↻';
+        icon.style.color = '';
+        icon.style.fontWeight = '';
+      }, 800);
     }
 
     function renderDashboard(data) {
+      _dashboardData = data;
       currentVariableCount = data.variableCount || 0;
 
       document.getElementById('root').innerHTML = `
-        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 12px 20px; position: relative;">
-          <div style="position: absolute; top: 20px; right: 20px; display: flex; gap: 8px;">
-            <div class="settings-icon" id="refresh-btn" onclick="refreshDashboard()" title="Refresh" style="position: static;">↻</div>
-            <div class="settings-icon" onclick="showGitHubSettings()" title="GitHub Settings" style="position: static;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
-              </svg>
-            </div>
-          </div>
-
-          <div class="logo">b/</div>
-
-          <h2 style="margin: 0 0 16px 0; font-size: 16px; font-weight: 600; color: var(--text-primary);">Token Manager</h2>
-
-          <div class="status-card">
-            <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Current Status</div>
-            <div class="status-row">
-              <span class="status-label">Variables in Figma</span>
-              <span class="status-value">${currentVariableCount}</span>
-            </div>
-            ${data.githubConnected ? `
-              <div class="status-row" style="border-top: 1px solid #f0f0f0; margin-top: 8px; padding-top: 12px;">
-                <span class="status-label">Connected Repo</span>
-                <span class="status-value" style="font-size: 11px;">${data.githubRepo}</span>
+        <div style="display: flex; flex-direction: column; height: 100vh;">
+          <div style="padding: 16px 20px 0 20px; flex-shrink: 0;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+              <div class="logo" style="margin-bottom: 0;">b/</div>
+              <div style="display: flex; gap: 8px;">
+                <div class="settings-icon" onclick="refreshDashboard()" title="Refresh" style="position: static;"><span id="refresh-icon" style="display:inline-block;">↻</span></div>
+                <div class="settings-icon" onclick="showGitHubSettings()" title="GitHub Settings" style="position: static;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
+                  </svg>
+                </div>
               </div>
-            ` : ''}
+            </div>
+            <div style="display: flex; margin: 0 -20px; padding: 0 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;">
+              <button onclick="switchTab('designer')" style="flex: 1; padding: 9px 0; text-align: center; border: none; border-bottom: 2px solid ${_activeTab === 'designer' ? 'var(--accent)' : 'transparent'}; background: transparent; font-size: 12px; font-weight: 600; cursor: pointer; color: ${_activeTab === 'designer' ? 'var(--accent)' : 'var(--text-muted)'}; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s;">Designer</button>
+              <button onclick="switchTab('developer')" style="flex: 1; padding: 9px 0; text-align: center; border: none; border-bottom: 2px solid ${_activeTab === 'developer' ? 'var(--accent)' : 'transparent'}; background: transparent; font-size: 12px; font-weight: 600; cursor: pointer; color: ${_activeTab === 'developer' ? 'var(--accent)' : 'var(--text-muted)'}; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s;">Developer</button>
+            </div>
           </div>
+          <div id="tab-content" style="flex: 1; overflow-y: auto; min-height: 0; padding: 16px 20px 12px 20px;">
+            ${_activeTab === 'designer' ? renderDesignerTabHtml(data) : renderDeveloperTabHtml()}
+          </div>
+        </div>
+      `;
+    }
 
-          <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Quick Actions</div>
+    function switchTab(tab) {
+      _activeTab = tab;
+      if (_dashboardData) renderDashboard(_dashboardData);
+    }
 
-          <button class="action-button ${!data.githubConnected ? 'action-button-disabled' : ''}" ${!data.githubConnected ? 'disabled' : 'onclick="showPushScreen()"'}>
-            <span class="action-icon">🚀</span>
-            <span>Push to GitHub</span>
-            ${!data.githubConnected ? '<span style="font-size: 10px; color: #bbb; margin-left: auto;">Configure GitHub first</span>' : ''}
-          </button>
+    function renderDesignerTabHtml(data) {
+      var gc = data.githubConnected;
+      var gr = data.githubRepo || '';
+      var vc = data.variableCount || 0;
+      return `
+        <div class="status-card">
+          <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Status</div>
+          <div class="status-row">
+            <span class="status-label">Variables in Figma</span>
+            <span class="status-value">${vc}</span>
+          </div>
+          ${gc ? `<div class="status-row" style="border-top: 1px solid var(--border); margin-top: 8px; padding-top: 12px;"><span class="status-label">Connected Repo</span><span class="status-value" style="font-size: 11px;">${gr}</span></div>` : ''}
+        </div>
 
-          <button class="action-button" onclick="showCollectionManager()">
-            <span class="action-icon">🗂️</span>
-            <span>Tokens &amp; Variables</span>
-            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
-          </button>
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Quick Actions</div>
 
-          <button class="action-button" onclick="showCreateScreen()">
-            <span class="action-icon">✨</span>
-            <span>Create</span>
-            <span style="margin-left: auto; background: #434343; color: #BBBBBB; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">NEW</span>
-          </button>
+        <button class="action-button" onclick="showCreateScreen()">
+          <span class="action-icon">✨</span>
+          <span>Create</span>
+          <span style="margin-left: auto; background: #434343; color: #BBBBBB; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">NEW</span>
+        </button>
 
-          <button class="action-button" onclick="showInspectScreen()">
-            <span class="action-icon">🔍</span>
-            <span>Inspect component</span>
-            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
-          </button>
+        <button class="action-button" onclick="showCollectionManager()">
+          <span class="action-icon">🗂️</span>
+          <span>Tokens &amp; Variables</span>
+          <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
+        </button>
 
-          <button class="action-button" onclick="showAuditScreen()">
-            <span class="action-icon">📊</span>
-            <span>Page audit</span>
-            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
-          </button>
+        <button class="action-button" onclick="showInspectScreen()">
+          <span class="action-icon">🔍</span>
+          <span>Inspect component</span>
+          <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
+        </button>
 
-          <button class="action-button" onclick="showUnusedVarsScreen()">
-            <span class="action-icon">🗑️</span>
-            <span>Unused variables</span>
-            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
-          </button>
+        <button class="action-button" onclick="showAuditScreen()">
+          <span class="action-icon">📊</span>
+          <span>Page audit</span>
+          <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
+        </button>
 
-          <button class="action-button" onclick="showDevToolsScreen()">
-            <span class="action-icon">👩‍💻</span>
-            <span>Dev tools</span>
-            <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
-          </button>
+        <button class="action-button" onclick="showUnusedVarsScreen()">
+          <span class="action-icon">🗑️</span>
+          <span>Unused variables</span>
+          <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
+        </button>
+
+        <button class="action-button" onclick="showDuplicateFinderScreen()">
+          <span class="action-icon">♊</span>
+          <span>Duplicate tokens</span>
+          <span style="margin-left: auto; background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">BETA</span>
+        </button>
+
+      `;
+    }
+
+    function renderDeveloperTabHtml() {
+      var gc = _dashboardData && _dashboardData.githubConnected;
+      var gr = _dashboardData && _dashboardData.githubRepo || '';
+      return `
+        <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">GitHub</div>
+        <button class="action-button ${!gc ? 'action-button-disabled' : ''}" ${!gc ? 'disabled' : 'onclick="showPushScreen()"'}>
+          <span class="action-icon">🚀</span>
+          <span>Push to GitHub</span>
+          ${!gc ? '<span style="font-size: 10px; color: #bbb; margin-left: auto;">Configure GitHub first</span>' : ''}
+        </button>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px;margin-top:8px;">
+          <div style="font-size:12px;color:var(--text-body);margin-bottom:10px;line-height:1.5;">Compare current Figma variables against the version on GitHub to see what changed before pushing.</div>
+          <button class="button-primary" style="margin-top:0;" onclick="runTokenDiff()">Compare with GitHub</button>
+          <div id="diff-body" style="margin-top:10px;"></div>
+        </div>
+
+        <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Component token export</div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px;">
+          <div style="font-size:12px;color:var(--text-body);margin-bottom:10px;line-height:1.5;">Select a component or frame on the canvas, then export all design token values it uses — ready to hand off to developers.</div>
+          <button class="button-primary" style="margin-top:0;" onclick="loadComponentTokens()">Export tokens for selection</button>
+          <div id="component-tokens-body" style="margin-top:10px;"></div>
+        </div>
+
+        <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Astro component map</div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;">
+          <div style="font-size:12px;color:var(--text-body);margin-bottom:10px;line-height:1.5;">Name your Figma components, component sets, or frames after Astro components (e.g. <code style="background:var(--surface-subtle);padding:1px 4px;border-radius:3px;">Button</code>, <code style="background:var(--surface-subtle);padding:1px 4px;border-radius:3px;">Card</code>, <code style="background:var(--surface-subtle);padding:1px 4px;border-radius:3px;">Input</code>), then click Detect. Each matched result shows the import path, usage example, and which keyword was matched.</div>
+          <button class="button-primary" style="margin-top:0;" onclick="loadComponentMap()">Detect components</button>
+          <div id="component-map-body" style="margin-top:10px;"></div>
         </div>
       `;
     }
@@ -829,13 +874,13 @@
 
           <div style="flex: 1; overflow-y: auto; min-height: 0;">
             <label class="input-label">Branch Name</label>
-            <input type="text" class="input-field" id="push-branch" value="${defaultBranch}" />
+            <input type="text" class="input-field" id="push-branch" value="${defaultBranch}" onclick="this.focus()" />
 
             <label class="input-label">PR Title</label>
-            <input type="text" class="input-field" id="push-pr-title" placeholder="Update design tokens from Figma" />
+            <input type="text" class="input-field" id="push-pr-title" placeholder="Update design tokens from Figma" onclick="this.focus()" />
 
             <label class="input-label">PR Description <span style="color:#bbb; font-weight:400;">(optional)</span></label>
-            <textarea class="input-field" id="push-pr-body" rows="3" placeholder="Describe what changed..." style="resize: none; height: 72px;"></textarea>
+            <textarea class="input-field" id="push-pr-body" rows="3" placeholder="Describe what changed..." style="resize: none; height: 72px;" onclick="this.focus()"></textarea>
 
             <div style="background: var(--accent-bg); border-radius: 8px; padding: 12px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; margin-top: 4px;">
               Will push to <strong>${githubConfig.owner}/${githubConfig.repo}</strong> and open a PR into <strong>${githubConfig.branch}</strong>
@@ -847,6 +892,10 @@
           </div>
         </div>
       `;
+      setTimeout(function() {
+        var el = document.getElementById('push-pr-title');
+        if (el) el.focus();
+      }, 50);
     }
 
     function initiatePush() {
@@ -876,9 +925,21 @@
       };
 
       try {
-        // Step 1: Get base branch SHA
-        const refRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${baseBranch}`, { headers });
-        if (!refRes.ok) throw new Error('Could not get base branch: ' + refRes.statusText);
+        // Step 1: Get base branch SHA — auto-detect default branch if configured one returns 404
+        let prBaseBranch = baseBranch;
+        let refRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${prBaseBranch}`, { headers });
+        if (!refRes.ok && refRes.status === 404) {
+          const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
+          if (repoRes.ok) {
+            const repoInfo = await repoRes.json();
+            prBaseBranch = repoInfo.default_branch || prBaseBranch;
+            refRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${prBaseBranch}`, { headers });
+          }
+        }
+        if (!refRes.ok) {
+          const errBody = await refRes.json().catch(() => ({}));
+          throw new Error(`Could not get base branch "${prBaseBranch}" (${refRes.status}): ${errBody.message || refRes.statusText}`);
+        }
         const refData = await refRes.json();
         const commitSha = refData.object.sha;
 
@@ -923,7 +984,7 @@
         const prRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ title: prTitle, body: prBody, head: newBranch, base: baseBranch })
+          body: JSON.stringify({ title: prTitle, body: prBody, head: newBranch, base: prBaseBranch })
         });
         if (!prRes.ok) {
           const err = await prRes.json();
@@ -955,7 +1016,10 @@
 
     var _allCollections = [];
 
+    var _tokenSearchQuery = '';
+
     function showCollectionManager() {
+      _tokenSearchQuery = '';
       document.getElementById('root').innerHTML = `
         <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px; position: relative;">
           <div class="screen-header">
@@ -964,6 +1028,12 @@
               <p class="screen-title">Tokens &amp; Variables <span style="background: #f59e0b; color: white; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; vertical-align: middle;">BETA</span></p>
               <p class="screen-subtitle">Select or drag variables to move between collections</p>
             </div>
+          </div>
+
+          <div style="position: relative; margin-bottom: 8px; flex-shrink: 0;">
+            <input id="token-search" type="text" placeholder="Search by name or value…" oninput="filterTokens(this.value)"
+              style="width:100%;padding:8px 12px 8px 32px;font-size:12px;border:1px solid var(--border-input);border-radius:8px;background:var(--surface);color:var(--text-primary);outline:none;" />
+            <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:13px;color:var(--text-muted);pointer-events:none;">🔍</span>
           </div>
 
           <div id="collections-list" style="flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
@@ -1064,6 +1134,34 @@
           row.classList.remove('dragging');
           document.querySelectorAll('.collection-header').forEach(function(h) { h.classList.remove('drag-over'); });
         });
+      });
+    }
+
+    function filterTokens(query) {
+      _tokenSearchQuery = query.toLowerCase().trim();
+      var rows = document.querySelectorAll('.variable-row');
+      var blocks = document.querySelectorAll('.collection-block');
+      if (!_tokenSearchQuery) {
+        rows.forEach(function(r) { r.style.display = ''; });
+        blocks.forEach(function(b) {
+          b.style.display = '';
+          var container = b.querySelector('.variables-container');
+          if (container) container.style.display = b.classList.contains('open') ? '' : 'none';
+        });
+        return;
+      }
+      blocks.forEach(function(block) {
+        var container = block.querySelector('.variables-container');
+        var anyVisible = false;
+        block.querySelectorAll('.variable-row').forEach(function(row) {
+          var name = (row.querySelector('span[style*="flex: 1"]') || row.querySelector('span[style*="flex:1"]') || {}).textContent || '';
+          var val = (row.querySelector('span[style*="text-muted"]') || {}).textContent || '';
+          var match = name.toLowerCase().includes(_tokenSearchQuery) || val.toLowerCase().includes(_tokenSearchQuery);
+          row.style.display = match ? '' : 'none';
+          if (match) anyVisible = true;
+        });
+        block.style.display = anyVisible ? '' : 'none';
+        if (anyVisible && container) container.style.display = '';
       });
     }
 
@@ -1544,8 +1642,8 @@
             <label class="input-label">Repository Name</label>
             <input type="text" class="input-field" id="github-repo" placeholder="design-tokens" />
 
-            <label class="input-label">Branch</label>
-            <input type="text" class="input-field" id="github-branch" value="main" />
+            <label class="input-label">Branch <span style="color:#bbb;font-weight:400;">(leave blank to auto-detect)</span></label>
+            <input type="text" class="input-field" id="github-branch" placeholder="main" />
 
             <label class="input-label">Token File Path</label>
             <input type="text" class="input-field" id="github-path" placeholder="tokens/colors.json" />
@@ -1573,7 +1671,7 @@
         token: document.getElementById('github-token').value,
         owner: document.getElementById('github-owner').value,
         repo: document.getElementById('github-repo').value,
-        branch: document.getElementById('github-branch').value,
+        branch: document.getElementById('github-branch').value || 'main',
         path: document.getElementById('github-path').value
       };
 
@@ -1585,6 +1683,96 @@
       }, '*');
 
       showDashboard();
+    }
+
+    async function runTokenDiff() {
+      var body = document.getElementById('diff-body');
+      if (!body) return;
+      if (!githubConfig || !githubConfig.token || !githubConfig.owner || !githubConfig.repo || !githubConfig.path) {
+        body.innerHTML = '<div style="color:#f59e0b;font-size:11px;line-height:1.5;">GitHub not configured — set it up via the ⚙ icon on the dashboard.</div>';
+        return;
+      }
+      body.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:4px 0;">Fetching from GitHub…</div>';
+      try {
+        var url = 'https://api.github.com/repos/' + githubConfig.owner + '/' + githubConfig.repo + '/contents/' + githubConfig.path + '?ref=' + githubConfig.branch;
+        var res = await fetch(url, { headers: { 'Authorization': 'token ' + githubConfig.token, 'Accept': 'application/vnd.github.v3+json' } });
+        if (!res.ok) throw new Error('GitHub: ' + res.status + ' ' + res.statusText);
+        var data = await res.json();
+        var raw = JSON.parse(atob(data.content.replace(/\n/g, '')));
+        var githubFlat = flattenForDiff(raw);
+        if (body) body.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:4px 0;">Fetching Figma variables…</div>';
+        window._diffGithub = githubFlat;
+        parent.postMessage({ pluginMessage: { type: 'get-all-variables-for-diff' } }, '*');
+      } catch (e) {
+        if (body) body.innerHTML = '<div style="color:#ef4444;font-size:11px;">' + escHtml(String(e)) + '</div>';
+      }
+    }
+
+    function flattenForDiff(obj) {
+      var result = {};
+      function walk(o, prefix) {
+        for (var k in o) {
+          var fullKey = prefix ? prefix + '/' + k : k;
+          var v = o[k];
+          if (v && typeof v === 'object' && !Array.isArray(v)) {
+            var hasValue = '$value' in v || 'value' in v;
+            if (hasValue) {
+              result[fullKey] = String(v.$value !== undefined ? v.$value : v.value);
+            } else {
+              walk(v, fullKey);
+            }
+          } else if (v !== null && v !== undefined && typeof v !== 'object') {
+            result[fullKey] = String(v);
+          }
+        }
+      }
+      walk(obj, '');
+      return result;
+    }
+
+    function renderTokenDiff(figmaVars) {
+      var body = document.getElementById('diff-body');
+      if (!body || !window._diffGithub) return;
+      var github = window._diffGithub;
+
+      var figmaMap = {};
+      figmaVars.forEach(function(v) { figmaMap[v.name] = v.value; });
+
+      var added = [], removed = [], changed = [];
+      for (var k in figmaMap) {
+        if (!(k in github)) added.push(k);
+        else if (String(figmaMap[k]) !== String(github[k])) changed.push({ name: k, figma: figmaMap[k], github: github[k] });
+      }
+      for (var k in github) {
+        if (!(k in figmaMap)) removed.push(k);
+      }
+
+      if (!added.length && !removed.length && !changed.length) {
+        body.innerHTML = '<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#22c55e;padding:6px 0;"><span>✓</span>Figma and GitHub are in sync — no differences found.</div>';
+        return;
+      }
+
+      var html = '<div style="display:flex;gap:10px;font-size:11px;font-weight:600;margin-bottom:8px;">' +
+        (added.length ? '<span style="color:#22c55e;">+' + added.length + ' added</span>' : '') +
+        (removed.length ? '<span style="color:#ef4444;">−' + removed.length + ' removed</span>' : '') +
+        (changed.length ? '<span style="color:#f59e0b;">~' + changed.length + ' changed</span>' : '') +
+        '</div>';
+
+      function row(label, name, extra) {
+        return '<div style="display:flex;align-items:baseline;gap:6px;padding:5px 8px;font-size:11px;border-bottom:1px solid var(--border);">' +
+          '<span style="font-size:10px;font-weight:700;width:14px;flex-shrink:0;color:' + (label === '+' ? '#22c55e' : label === '−' ? '#ef4444' : '#f59e0b') + ';">' + label + '</span>' +
+          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary);">' + escHtml(name) + '</span>' +
+          (extra ? '<span style="color:var(--text-muted);font-family:monospace;font-size:10px;flex-shrink:0;max-width:120px;overflow:hidden;text-overflow:ellipsis;">' + escHtml(extra) + '</span>' : '') +
+          '</div>';
+      }
+
+      html += '<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;max-height:280px;overflow-y:auto;">';
+      changed.forEach(function(c) { html += row('~', c.name, c.github + ' → ' + c.figma); });
+      added.forEach(function(n) { html += row('+', n, figmaMap[n]); });
+      removed.forEach(function(n) { html += row('−', n, github[n]); });
+      html += '</div>';
+
+      body.innerHTML = html;
     }
 
     function exportTokens() {
@@ -2337,7 +2525,66 @@
       if (body) body.innerHTML = '<div class="inspect-empty"><div style="font-size:32px;">⏳</div><div>Deleting…</div></div>';
     }
 
-    // ── Dev Tools Screen ─────────────────────────────────────────────────────
+    // ── Duplicate Finder Screen ───────────────────────────────────────────────
+
+    function showDuplicateFinderScreen() {
+      document.getElementById('root').innerHTML = `
+        <div style="display: flex; flex-direction: column; height: 100vh; padding: 20px 20px 0 20px;">
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">Duplicate tokens</p>
+              <p class="screen-subtitle">Variables with identical resolved values</p>
+            </div>
+          </div>
+          <div id="dupes-body" style="flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
+            <div class="inspect-empty">
+              <div style="font-size: 32px; display:inline-block; animation: spin 1s linear infinite;">⏳</div>
+              <div>Scanning all variables…</div>
+            </div>
+          </div>
+        </div>
+      `;
+      parent.postMessage({ pluginMessage: { type: 'find-duplicate-tokens' } }, '*');
+    }
+
+    function renderDuplicates(msg) {
+      var body = document.getElementById('dupes-body');
+      if (!body) return;
+      var groups = msg.groups || [];
+
+      if (groups.length === 0) {
+        body.innerHTML = '<div class="inspect-empty"><div style="font-size:32px;">✅</div><div>No duplicates found!</div><div style="font-size:11px;color:var(--text-muted);">All variables have unique resolved values.</div></div>';
+        return;
+      }
+
+      var totalDupes = groups.reduce(function(s, g) { return s + g.variables.length; }, 0);
+      var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">' + groups.length + ' value' + (groups.length !== 1 ? 's' : '') + ' shared across ' + totalDupes + ' variables</div>';
+
+      groups.forEach(function(g) {
+        var isColor = g.type === 'COLOR';
+        var swatch = isColor ? '<span class="color-swatch" style="background:' + escHtml(g.value) + ';width:14px;height:14px;flex-shrink:0;"></span>' : '';
+        html += '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden;">' +
+          '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--surface-subtle);border-bottom:1px solid var(--border);">' +
+            swatch +
+            '<span style="font-family:monospace;font-size:11px;font-weight:600;color:var(--text-primary);flex:1;">' + escHtml(g.value) + '</span>' +
+            '<span class="var-type-badge var-type-' + g.type + '">' + (g.type === 'FLOAT' ? 'NUM' : g.type.slice(0,3)) + '</span>' +
+            '<span style="font-size:10px;color:var(--text-muted);">' + g.variables.length + ' vars</span>' +
+          '</div>';
+        g.variables.forEach(function(v) {
+          html += '<div style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--border);font-size:11px;">' +
+            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary);">' + escHtml(v.name) + '</span>' +
+            '<span style="color:var(--text-muted);font-size:10px;flex-shrink:0;">' + escHtml(v.collection) + '</span>' +
+            '<button onclick="copyToClipboard(\'' + escHtml(v.name).replace(/'/g,"\\'") + '\')" style="flex-shrink:0;font-size:9px;padding:2px 7px;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--accent);cursor:pointer;font-weight:600;">Copy name</button>' +
+          '</div>';
+        });
+        html += '</div>';
+      });
+
+      body.innerHTML = html;
+    }
+
+// ── Dev Tools Screen ─────────────────────────────────────────────────────
 
     function showDevToolsScreen() {
       document.getElementById('root').innerHTML = `
@@ -2450,9 +2697,31 @@
         });
       }
 
-      html += '<button onclick="downloadTextFile(\'' + btoa(unescape(encodeURIComponent(jsonStr))) + '\', \'component-tokens.json\')" style="margin-top:8px;width:100%;padding:6px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--accent);cursor:pointer;">Download JSON</button>';
+      var cssStr = tokensJsonToCss(combinedJson);
+      html += '<div style="display:flex;gap:6px;margin-top:8px;">' +
+        '<button onclick="downloadTextFile(\'' + btoa(unescape(encodeURIComponent(jsonStr))) + '\', \'component-tokens.json\')" style="flex:1;padding:6px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--accent);cursor:pointer;">Download JSON</button>' +
+        '<button onclick="copyToClipboard(\'' + cssStr.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n') + '\')" style="flex:1;padding:6px;font-size:11px;font-weight:600;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:white;cursor:pointer;">Copy as CSS</button>' +
+        '</div>';
 
       body.innerHTML = html;
+    }
+
+    function tokensJsonToCss(obj) {
+      var lines = [':root {'];
+      function walk(o, prefix) {
+        for (var k in o) {
+          var key = prefix ? prefix + '-' + k : k;
+          var cssKey = '--' + key.replace(/\//g, '-').replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+          if (o[k] !== null && typeof o[k] === 'object' && !Array.isArray(o[k])) {
+            walk(o[k], key);
+          } else {
+            lines.push('  ' + cssKey + ': ' + o[k] + ';');
+          }
+        }
+      }
+      walk(obj, '');
+      lines.push('}');
+      return lines.join('\n');
     }
 
     function downloadTextFile(b64, filename) {
@@ -2546,7 +2815,11 @@
         const wasRefreshing = _isRefreshing;
         _isRefreshing = false;
         renderDashboard(msg.data);
-        if (wasRefreshing) showRefreshSuccess();
+        if (wasRefreshing) {
+          const btn = document.getElementById('refresh-icon');
+          if (btn) btn.classList.add('spinning');
+          setTimeout(showRefreshSuccess, 300);
+        }
       } else if (msg.type === 'figma-variables') {
         showComparison(msg.variables);
       } else if (msg.type === 'replace-complete') {
@@ -2647,12 +2920,27 @@
         a.download = msg.filename;
         a.click();
         URL.revokeObjectURL(url);
+      } else if (msg.type === 'duplicate-tokens-result') {
+        renderDuplicates(msg);
+      } else if (msg.type === 'all-variables-for-diff') {
+        renderTokenDiff(msg.variables);
       } else if (msg.type === 'error') {
         // Cancel any pending zip collection on backend error so we don't hang
         _zipBuffer = null;
         alert('Error: ' + msg.error);
       }
     };
+
+    // Ensure the plugin iframe captures keyboard focus on every click.
+    // Figma intercepts keyboard events from the canvas; calling window.focus() + re-focusing
+    // the target element is the reliable fix for inputs appearing non-typeable.
+    document.addEventListener('mousedown', function(e) {
+      window.focus();
+      var t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+        setTimeout(function() { t.focus(); }, 0);
+      }
+    }, true);
 
     console.log('UI initialized');
 

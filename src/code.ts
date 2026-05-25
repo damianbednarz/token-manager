@@ -1767,6 +1767,105 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  if (msg.type === 'find-duplicate-tokens') {
+    try {
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const varMap = new Map<string, Variable>();
+      const colNameMap = new Map<string, string>();
+      for (const col of collections) {
+        colNameMap.set(col.id, col.name);
+        for (const varId of col.variableIds) {
+          const v = await figma.variables.getVariableByIdAsync(varId);
+          if (v) varMap.set(v.id, v);
+        }
+      }
+
+      function resolveValue(v: Variable): any {
+        const modeId = Object.keys(v.valuesByMode)[0];
+        if (!modeId) return null;
+        let cur: any = v.valuesByMode[modeId];
+        let safety = 0;
+        while (cur && typeof cur === 'object' && cur.type === 'VARIABLE_ALIAS' && safety++ < 20) {
+          const target = varMap.get(cur.id);
+          if (!target) break;
+          cur = target.valuesByMode[Object.keys(target.valuesByMode)[0]];
+        }
+        return cur;
+      }
+
+      function valueKey(raw: any, type: string): string {
+        if (raw === null || raw === undefined) return '';
+        if (type === 'COLOR' && typeof raw === 'object' && 'r' in raw) {
+          const r = Math.round(raw.r * 255), g = Math.round(raw.g * 255), b = Math.round(raw.b * 255);
+          const a = raw.a !== undefined ? Math.round(raw.a * 1000) / 1000 : 1;
+          return `color:${r},${g},${b},${a}`;
+        }
+        return String(raw);
+      }
+
+      function displayValue(key: string, type: string): string {
+        if (key.startsWith('color:')) {
+          const [r, g, b] = key.slice(6).split(',').map(Number);
+          return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+        }
+        return key;
+      }
+
+      const byValue = new Map<string, any[]>();
+      for (const [, v] of varMap) {
+        const raw = resolveValue(v);
+        const key = valueKey(raw, v.resolvedType);
+        if (!key) continue;
+        if (!byValue.has(key)) byValue.set(key, []);
+        byValue.get(key)!.push({
+          id: v.id,
+          name: v.name,
+          collection: colNameMap.get(v.variableCollectionId) || '',
+          type: v.resolvedType,
+        });
+      }
+
+      const groups = [];
+      for (const [key, vars] of byValue) {
+        if (vars.length >= 2) {
+          groups.push({ value: displayValue(key, vars[0].type), type: vars[0].type, variables: vars });
+        }
+      }
+      groups.sort((a, b) => b.variables.length - a.variables.length);
+      figma.ui.postMessage({ type: 'duplicate-tokens-result', groups });
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
+    }
+  }
+
+if (msg.type === 'get-all-variables-for-diff') {
+    try {
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const variables: any[] = [];
+      for (const col of collections) {
+        const modeId = col.modes[0].modeId;
+        for (const varId of col.variableIds) {
+          const v = await figma.variables.getVariableByIdAsync(varId);
+          if (!v) continue;
+          const raw = v.valuesByMode[modeId];
+          let displayValue: string;
+          if (v.resolvedType === 'COLOR' && typeof raw === 'object' && raw && 'r' in raw) {
+            const r = Math.round((raw as any).r * 255), g = Math.round((raw as any).g * 255), b = Math.round((raw as any).b * 255);
+            displayValue = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+          } else if (raw && typeof raw === 'object' && (raw as any).type === 'VARIABLE_ALIAS') {
+            displayValue = `alias:${(raw as any).id}`;
+          } else {
+            displayValue = String(raw ?? '');
+          }
+          variables.push({ name: v.name, collection: col.name, type: v.resolvedType, value: displayValue });
+        }
+      }
+      figma.ui.postMessage({ type: 'all-variables-for-diff', variables });
+    } catch (error) {
+      figma.ui.postMessage({ type: 'error', error: String(error) });
+    }
+  }
+
   if (msg.type === 'cancel') {
     figma.closePlugin();
   }

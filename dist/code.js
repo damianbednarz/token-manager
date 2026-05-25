@@ -2602,20 +2602,20 @@
                 if (!v)
                   return null;
                 const value = v.valuesByMode[defaultMode];
-                let displayValue = value;
+                let displayValue2 = value;
                 if (v.resolvedType === "COLOR" && typeof value === "object") {
                   const r = Math.round(value.r * 255);
                   const g = Math.round(value.g * 255);
                   const b = Math.round(value.b * 255);
-                  displayValue = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+                  displayValue2 = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
                 } else if (typeof value === "number") {
-                  displayValue = value;
+                  displayValue2 = value;
                 } else if (typeof value === "boolean") {
-                  displayValue = value;
+                  displayValue2 = value;
                 } else {
-                  displayValue = String(value);
+                  displayValue2 = String(value);
                 }
-                return { id: v.id, name: v.name, type: v.resolvedType, value: displayValue };
+                return { id: v.id, name: v.name, type: v.resolvedType, value: displayValue2 };
               }).filter(Boolean);
               return { id: collection.id, name: collection.name, variables };
             });
@@ -3105,6 +3105,104 @@
               type: "error",
               error: String(error)
             });
+          }
+        }
+        if (msg.type === "find-duplicate-tokens") {
+          try {
+            let resolveValue2 = function(v) {
+              const modeId = Object.keys(v.valuesByMode)[0];
+              if (!modeId)
+                return null;
+              let cur = v.valuesByMode[modeId];
+              let safety = 0;
+              while (cur && typeof cur === "object" && cur.type === "VARIABLE_ALIAS" && safety++ < 20) {
+                const target = varMap.get(cur.id);
+                if (!target)
+                  break;
+                cur = target.valuesByMode[Object.keys(target.valuesByMode)[0]];
+              }
+              return cur;
+            }, valueKey2 = function(raw, type) {
+              if (raw === null || raw === void 0)
+                return "";
+              if (type === "COLOR" && typeof raw === "object" && "r" in raw) {
+                const r = Math.round(raw.r * 255), g = Math.round(raw.g * 255), b = Math.round(raw.b * 255);
+                const a = raw.a !== void 0 ? Math.round(raw.a * 1e3) / 1e3 : 1;
+                return `color:${r},${g},${b},${a}`;
+              }
+              return String(raw);
+            }, displayValue2 = function(key, type) {
+              if (key.startsWith("color:")) {
+                const [r, g, b] = key.slice(6).split(",").map(Number);
+                return "#" + [r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("");
+              }
+              return key;
+            };
+            var resolveValue = resolveValue2, valueKey = valueKey2, displayValue = displayValue2;
+            const collections = yield figma.variables.getLocalVariableCollectionsAsync();
+            const varMap = /* @__PURE__ */ new Map();
+            const colNameMap = /* @__PURE__ */ new Map();
+            for (const col of collections) {
+              colNameMap.set(col.id, col.name);
+              for (const varId of col.variableIds) {
+                const v = yield figma.variables.getVariableByIdAsync(varId);
+                if (v)
+                  varMap.set(v.id, v);
+              }
+            }
+            const byValue = /* @__PURE__ */ new Map();
+            for (const [, v] of varMap) {
+              const raw = resolveValue2(v);
+              const key = valueKey2(raw, v.resolvedType);
+              if (!key)
+                continue;
+              if (!byValue.has(key))
+                byValue.set(key, []);
+              byValue.get(key).push({
+                id: v.id,
+                name: v.name,
+                collection: colNameMap.get(v.variableCollectionId) || "",
+                type: v.resolvedType
+              });
+            }
+            const groups = [];
+            for (const [key, vars] of byValue) {
+              if (vars.length >= 2) {
+                groups.push({ value: displayValue2(key, vars[0].type), type: vars[0].type, variables: vars });
+              }
+            }
+            groups.sort((a, b) => b.variables.length - a.variables.length);
+            figma.ui.postMessage({ type: "duplicate-tokens-result", groups });
+          } catch (error) {
+            figma.ui.postMessage({ type: "error", error: String(error) });
+          }
+        }
+        if (msg.type === "get-all-variables-for-diff") {
+          try {
+            const collections = yield figma.variables.getLocalVariableCollectionsAsync();
+            const variables = [];
+            for (const col of collections) {
+              const modeId = col.modes[0].modeId;
+              for (const varId of col.variableIds) {
+                const v = yield figma.variables.getVariableByIdAsync(varId);
+                if (!v)
+                  continue;
+                const raw = v.valuesByMode[modeId];
+                let displayValue2;
+                if (v.resolvedType === "COLOR" && typeof raw === "object" && raw && "r" in raw) {
+                  const r = Math.round(raw.r * 255), g = Math.round(raw.g * 255), b = Math.round(raw.b * 255);
+                  displayValue2 = "#" + [r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("");
+                } else if (raw && typeof raw === "object" && raw.type === "VARIABLE_ALIAS") {
+                  displayValue2 = `alias:${raw.id}`;
+                } else {
+                  displayValue2 = String(raw != null ? raw : "");
+                }
+                variables.push({ name: v.name, collection: col.name, type: v.resolvedType, value: displayValue2 });
+              }
+            }
+            figma.ui.postMessage({ type: "all-variables-for-diff", variables });
+          } catch (error) {
+            figma.ui.postMessage({ type: "error", error: String(error) });
           }
         }
         if (msg.type === "cancel") {
