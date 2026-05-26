@@ -23673,7 +23673,9 @@ var FigmaTokenReplacer = (() => {
         const r = Math.round(value.r * 255);
         const g = Math.round(value.g * 255);
         const b = Math.round(value.b * 255);
-        return "#" + [r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("");
+        const alpha = typeof value.a === "number" ? Math.round(value.a * 255) : 255;
+        const hex = [r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("");
+        return alpha < 255 ? `#${hex}${alpha.toString(16).padStart(2, "0")}` : `#${hex}`;
       }
       return String(value);
     };

@@ -5,6 +5,21 @@ import { THEMES, STYLES, BASE_THEMES, DEFAULT_BASE, STYLE_RADIUS } from './creat
 
 figma.showUI(__html__, { width: 450, height: 600 });
 
+function getDesignExportBaseName(): string {
+  const normalized = figma.root.name
+    .trim()
+    .toLowerCase()
+    .replace(/["']/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return normalized || 'figma';
+}
+
+function getDesignExportFileName(kind: 'tokens' | 'typography'): string {
+  return `${getDesignExportBaseName()}-${kind}.json`;
+}
+
 interface TokenValue {
   value: string | number;
   type?: string;
@@ -16,15 +31,35 @@ interface Tokens {
   [key: string]: TokenValue | Tokens;
 }
 
-function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result
-    ? {
-        r: parseInt(result[1], 16) / 255,
-        g: parseInt(result[2], 16) / 255,
-        b: parseInt(result[3], 16) / 255,
-      }
-    : null;
+function hexToRgb(hex: string): RGBA | null {
+  const normalized = hex.trim().replace(/^#/, '');
+
+  if (!/^[a-f\d]{3,4}$|^[a-f\d]{6}$|^[a-f\d]{8}$/i.test(normalized)) {
+    return null;
+  }
+
+  const expanded = normalized.length === 3 || normalized.length === 4
+    ? normalized.split('').map((char) => char + char).join('')
+    : normalized;
+
+  return {
+    r: parseInt(expanded.slice(0, 2), 16) / 255,
+    g: parseInt(expanded.slice(2, 4), 16) / 255,
+    b: parseInt(expanded.slice(4, 6), 16) / 255,
+    a: expanded.length === 8 ? parseInt(expanded.slice(6, 8), 16) / 255 : 1,
+  };
+}
+
+function rgbToHex(value: RGB | RGBA): string {
+  const r = Math.round(value.r * 255);
+  const g = Math.round(value.g * 255);
+  const b = Math.round(value.b * 255);
+  const alpha = 'a' in value && typeof value.a === 'number' ? Math.round(value.a * 255) : 255;
+  const hex = [r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('');
+
+  return alpha < 255
+    ? `#${hex}${alpha.toString(16).padStart(2, '0')}`
+    : `#${hex}`;
 }
 
 function parseTokenValue(token: TokenValue): { value: any; type: string } {
@@ -491,6 +526,89 @@ async function rebindAllReferences(remapping: Map<string, Variable>): Promise<Re
   return stats;
 }
 
+function formatVariableValue(variable: Variable, value: VariableValue): string | number | boolean {
+  if (variable.resolvedType === 'COLOR' && typeof value === 'object') {
+    return rgbToHex(value as RGB | RGBA);
+  }
+
+  return value as string | number | boolean;
+}
+
+function getTokenType(variable: Variable): string {
+  return variable.resolvedType === 'COLOR' ? 'color' :
+         variable.resolvedType === 'FLOAT' ? 'number' :
+         variable.resolvedType === 'BOOLEAN' ? 'boolean' : 'string';
+}
+
+function setNestedTokenValue(target: Record<string, any>, variableName: string, token: Record<string, any>) {
+  const parts = variableName.split('/');
+  let current = target;
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!current[parts[i]]) {
+      current[parts[i]] = {};
+    }
+    current = current[parts[i]];
+  }
+
+  current[parts[parts.length - 1]] = token;
+}
+
+async function buildVariableExportData(collections?: VariableCollection[]): Promise<any> {
+  const sourceCollections = collections || await figma.variables.getLocalVariableCollectionsAsync();
+  const hasMultiModeCollection = sourceCollections.some((collection) => collection.modes.length > 1);
+
+  if (!hasMultiModeCollection) {
+    const exportData: Record<string, any> = {};
+
+    for (const collection of sourceCollections) {
+      const defaultMode = collection.modes[0]?.modeId;
+      if (!defaultMode) continue;
+
+      for (const variableId of collection.variableIds) {
+        const variable = figma.variables.getVariableById(variableId);
+        if (!variable) continue;
+
+        const value = variable.valuesByMode[defaultMode];
+        if (value === undefined) continue;
+        setNestedTokenValue(exportData, variable.name, {
+          $value: formatVariableValue(variable, value),
+          $type: getTokenType(variable)
+        });
+      }
+    }
+
+    return exportData;
+  }
+
+  const exportData: Array<Record<string, any>> = [];
+
+  for (const collection of sourceCollections) {
+    const collectionData: Record<string, any> = { modes: {} };
+
+    for (const mode of collection.modes) {
+      const modeData: Record<string, any> = {};
+
+      for (const variableId of collection.variableIds) {
+        const variable = figma.variables.getVariableById(variableId);
+        if (!variable) continue;
+
+        const value = variable.valuesByMode[mode.modeId];
+        if (value === undefined) continue;
+        setNestedTokenValue(modeData, variable.name, {
+          $value: formatVariableValue(variable, value),
+          $type: getTokenType(variable)
+        });
+      }
+
+      collectionData.modes[mode.name] = modeData;
+    }
+
+    exportData.push({ [collection.name]: collectionData });
+  }
+
+  return exportData;
+}
 async function getFigmaVariables() {
   const collections = await figma.variables.getLocalVariableCollectionsAsync();
   const variables: any[] = [];
@@ -568,48 +686,13 @@ figma.ui.onmessage = async (msg) => {
         ? allCollections.filter(c => filterIds.indexOf(c.id) !== -1)
         : allCollections;
 
-      const exportData: any = {};
-
-      for (const collection of collections) {
-        for (const variableId of collection.variableIds) {
-          const variable = figma.variables.getVariableById(variableId);
-          if (variable) {
-            const defaultMode = collection.modes[0].modeId;
-            const value = variable.valuesByMode[defaultMode];
-
-            let formattedValue = value;
-            if (variable.resolvedType === 'COLOR' && typeof value === 'object') {
-              const r = Math.round((value as any).r * 255);
-              const g = Math.round((value as any).g * 255);
-              const b = Math.round((value as any).b * 255);
-              formattedValue = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-            }
-
-            const parts = variable.name.split('/');
-            let current = exportData;
-            for (let i = 0; i < parts.length - 1; i++) {
-              if (!current[parts[i]]) {
-                current[parts[i]] = {};
-              }
-              current = current[parts[i]];
-            }
-
-            const lastPart = parts[parts.length - 1];
-            current[lastPart] = {
-              $value: formattedValue,
-              $type: variable.resolvedType === 'COLOR' ? 'color' :
-                     variable.resolvedType === 'FLOAT' ? 'number' :
-                     variable.resolvedType === 'BOOLEAN' ? 'boolean' : 'string'
-            };
-          }
-        }
-      }
+      const exportData = await buildVariableExportData(collections);
 
       const jsonString = JSON.stringify(exportData, null, 2);
       figma.ui.postMessage({
         type: 'download-json',
         json: jsonString,
-        filename: 'figma-tokens.json'
+        filename: getDesignExportFileName('tokens')
       });
 
       figma.notify('Tokens exported successfully');
@@ -623,41 +706,7 @@ figma.ui.onmessage = async (msg) => {
 
   if (msg.type === 'get-tokens-for-push') {
     try {
-      const collections = await figma.variables.getLocalVariableCollectionsAsync();
-      const exportData: any = {};
-
-      for (const collection of collections) {
-        for (const variableId of collection.variableIds) {
-          const variable = figma.variables.getVariableById(variableId);
-          if (variable) {
-            const defaultMode = collection.modes[0].modeId;
-            const value = variable.valuesByMode[defaultMode];
-
-            let formattedValue = value;
-            if (variable.resolvedType === 'COLOR' && typeof value === 'object') {
-              const r = Math.round((value as any).r * 255);
-              const g = Math.round((value as any).g * 255);
-              const b = Math.round((value as any).b * 255);
-              formattedValue = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-            }
-
-            const parts = variable.name.split('/');
-            let current = exportData;
-            for (let i = 0; i < parts.length - 1; i++) {
-              if (!current[parts[i]]) current[parts[i]] = {};
-              current = current[parts[i]];
-            }
-
-            const lastPart = parts[parts.length - 1];
-            current[lastPart] = {
-              $value: formattedValue,
-              $type: variable.resolvedType === 'COLOR' ? 'color' :
-                     variable.resolvedType === 'FLOAT' ? 'number' :
-                     variable.resolvedType === 'BOOLEAN' ? 'boolean' : 'string'
-            };
-          }
-        }
-      }
+      const exportData = await buildVariableExportData();
 
       figma.ui.postMessage({
         type: 'tokens-ready-for-push',
@@ -697,10 +746,7 @@ figma.ui.onmessage = async (msg) => {
           const value = v.valuesByMode[defaultMode];
           let displayValue: any = value;
           if (v.resolvedType === 'COLOR' && typeof value === 'object') {
-            const r = Math.round((value as any).r * 255);
-            const g = Math.round((value as any).g * 255);
-            const b = Math.round((value as any).b * 255);
-            displayValue = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+            displayValue = rgbToHex(value as RGB | RGBA);
           } else if (typeof value === 'number') {
             displayValue = value;
           } else if (typeof value === 'boolean') {
@@ -959,7 +1005,7 @@ figma.ui.onmessage = async (msg) => {
       figma.ui.postMessage({
         type: 'download-json',
         json: JSON.stringify(tokens, null, 2),
-        filename: 'figma-typography.json'
+        filename: getDesignExportFileName('typography')
       });
       figma.notify('Text styles exported');
     } catch (error) {
