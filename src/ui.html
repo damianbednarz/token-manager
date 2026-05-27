@@ -708,6 +708,15 @@
           ${gc ? `<div class="status-row" style="border-top: 1px solid var(--border); margin-top: 8px; padding-top: 12px;"><span class="status-label">Connected Repo</span><span class="status-value" style="font-size: 11px;">${gr}</span></div>` : ''}
         </div>
 
+        <button onclick="showClaudeScreen()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;margin-bottom:16px;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);border:1px solid rgba(100,120,255,0.3);border-radius:10px;cursor:pointer;text-align:left;transition:all 0.2s;">
+          <span style="font-size:22px;flex-shrink:0;">🤖</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:700;color:#e0e8ff;margin-bottom:2px;">Claude AI</div>
+            <div style="font-size:11px;color:#8899cc;">Let Claude read &amp; edit this file via MCP</div>
+          </div>
+          <span style="background:rgba(100,120,255,0.2);color:#8899ff;font-size:9px;font-weight:700;padding:3px 7px;border-radius:4px;letter-spacing:0.5px;border:1px solid rgba(100,120,255,0.3);flex-shrink:0;">MCP</span>
+        </button>
+
         <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Quick Actions</div>
 
         <button class="action-button" onclick="showCreateScreen()">
@@ -2807,6 +2816,195 @@
 
     // ── End inspect screen ───────────────────────────────────────────────────
 
+    // ── Claude AI / MCP bridge ────────────────────────────────────────────────
+    var _mcp = {
+      connected: false,
+      socket: null,
+      channel: null,
+      pendingRequests: new Map(),
+      port: 3055,
+    };
+
+    function showClaudeScreen() {
+      document.getElementById('root').innerHTML = `
+        <div style="display:flex;flex-direction:column;height:100vh;padding:20px 20px 0 20px;">
+          <div class="screen-header">
+            <div class="back-icon" onclick="showDashboard()">←</div>
+            <div>
+              <p class="screen-title">Claude AI <span style="background:#434343;color:#BBBBBB;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:0.5px;vertical-align:middle;">MCP</span></p>
+              <p class="screen-subtitle">Let Claude read and modify this file via the MCP bridge</p>
+            </div>
+          </div>
+
+          <div style="flex:1;overflow-y:auto;min-height:0;">
+            <div id="mcp-status" style="padding:10px 12px;border-radius:6px;font-size:12px;line-height:1.5;margin-bottom:16px;background:var(--surface);border:1px solid var(--border);color:var(--text-secondary);">
+              Disconnected — start the socket server, then click Connect.
+            </div>
+
+            <div id="mcp-progress-wrap" style="display:none;margin-bottom:12px;">
+              <div style="width:100%;height:4px;background:var(--border);border-radius:4px;overflow:hidden;">
+                <div id="mcp-progress-bar" style="width:0%;height:4px;background:var(--accent);border-radius:4px;transition:width 0.3s;"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:4px;">
+                <span id="mcp-progress-msg">No operation in progress</span>
+                <span id="mcp-progress-pct">0%</span>
+              </div>
+            </div>
+
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;color:var(--text-secondary);line-height:1.6;">
+              <strong style="color:var(--text-primary);font-size:12px;">How to use</strong><br>
+              1. In a terminal run:<br>
+              <code style="display:block;background:var(--pill-bg);padding:6px 8px;border-radius:4px;margin:6px 0;word-break:break-all;font-size:10px;">bun "C:/Users/antek/Downloads/claude-talk-to-figma-mcp-1.0.0/claude-talk-to-figma-mcp-1.0.0/claude-talk-to-figma-mcp/dist/socket.js"</code>
+              2. Click <strong>Connect</strong> below<br>
+              3. Copy the channel ID that appears<br>
+              4. In Claude, use the MCP tool <em>join_channel</em> with that ID
+            </div>
+
+            <div style="margin-top:16px;">
+              <label class="input-label">Server port</label>
+              <input type="number" class="input-field" id="mcp-port-input" value="3055" min="1" max="65535" style="margin-bottom:0;" />
+            </div>
+          </div>
+
+          <div style="padding:16px 0 12px 0;display:flex;gap:8px;">
+            <button class="button-primary" id="mcp-connect-btn" onclick="mcpConnect()" style="margin-top:0;flex:1;">Connect</button>
+            <button class="button-secondary" id="mcp-disconnect-btn" onclick="mcpDisconnect()" disabled style="margin-top:0;flex:1;opacity:0.5;cursor:not-allowed;">Disconnect</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function mcpSetStatus(connected, message) {
+      _mcp.connected = connected;
+      var el = document.getElementById('mcp-status');
+      if (!el) return;
+      el.textContent = message || (connected ? 'Connected to Claude MCP server' : 'Disconnected');
+      el.style.background = connected ? '#d8ffbb' : (message && message.indexOf('onnect') !== -1 && !connected ? 'var(--accent-bg)' : 'var(--surface)');
+      el.style.color = connected ? '#223005' : 'var(--text-secondary)';
+      el.style.border = connected ? '1px solid #a0e080' : '1px solid var(--border)';
+      var cb = document.getElementById('mcp-connect-btn');
+      var db = document.getElementById('mcp-disconnect-btn');
+      if (cb) { cb.disabled = connected; cb.style.opacity = connected ? '0.5' : ''; cb.style.cursor = connected ? 'not-allowed' : ''; }
+      if (db) { db.disabled = !connected; db.style.opacity = !connected ? '0.5' : ''; db.style.cursor = !connected ? 'not-allowed' : ''; }
+    }
+
+    function mcpConnect() {
+      var portInput = document.getElementById('mcp-port-input');
+      var port = portInput ? parseInt(portInput.value, 10) || 3055 : 3055;
+      _mcp.port = port;
+
+      if (_mcp.connected && _mcp.socket) { mcpSetStatus(true, 'Already connected'); return; }
+
+      mcpSetStatus(false, 'Connecting…');
+
+      try {
+        _mcp.socket = new WebSocket('ws://localhost:' + port);
+
+        _mcp.socket.onopen = function() {
+          var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+          var ch = '';
+          for (var i = 0; i < 8; i++) ch += chars.charAt(Math.floor(Math.random() * chars.length));
+          _mcp.channel = ch;
+          _mcp.socket.send(JSON.stringify({ type: 'join', channel: ch.trim() }));
+        };
+
+        _mcp.socket.onmessage = function(event) {
+          try {
+            var data = JSON.parse(event.data);
+            if (data.type === 'system' && data.message && data.message.result) {
+              _mcp.connected = true;
+              var ch = data.channel;
+              mcpSetStatus(true, 'Connected on port ' + port + ' · Channel: ' + ch + ' (click to copy)');
+              // Make channel ID copyable
+              var el = document.getElementById('mcp-status');
+              if (el) {
+                el.style.cursor = 'pointer';
+                el.onclick = function() {
+                  var txt = 'Connect to Figma, channel ' + ch;
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(txt).then(function() {
+                      parent.postMessage({ pluginMessage: { type: 'notify', message: 'Channel ID copied: ' + ch } }, '*');
+                    });
+                  }
+                };
+              }
+            } else if (data.type === 'error') {
+              mcpSetStatus(false, 'Error: ' + data.message);
+              _mcp.socket.close();
+            }
+            mcpHandleSocketMessage(data);
+          } catch(e) { console.error('MCP parse error', e); }
+        };
+
+        _mcp.socket.onclose = function() {
+          _mcp.connected = false;
+          _mcp.socket = null;
+          mcpSetStatus(false, 'Disconnected — try reconnecting');
+        };
+
+        _mcp.socket.onerror = function() {
+          mcpSetStatus(false, 'Connection error — is the socket server running?');
+          _mcp.connected = false;
+          _mcp.socket = null;
+        };
+      } catch(e) {
+        mcpSetStatus(false, 'Error: ' + (e.message || 'unknown'));
+      }
+    }
+
+    function mcpDisconnect() {
+      if (_mcp.socket) { _mcp.socket.close(); _mcp.socket = null; }
+      _mcp.connected = false;
+      mcpSetStatus(false, 'Disconnected');
+    }
+
+    function mcpHandleSocketMessage(payload) {
+      var data = payload.message;
+      if (!data) return;
+
+      // Response to a pending request
+      if (data.id && _mcp.pendingRequests.has(data.id)) {
+        var cb = _mcp.pendingRequests.get(data.id);
+        _mcp.pendingRequests.delete(data.id);
+        if (data.error) cb.reject(new Error(data.error));
+        else cb.resolve(data.result);
+        return;
+      }
+
+      // New command from Claude
+      if (data.command) {
+        parent.postMessage({ pluginMessage: { type: 'execute-command', id: data.id, command: data.command, params: data.params } }, '*');
+      }
+    }
+
+    function mcpHandleCommandResult(msg) {
+      if (!_mcp.connected || !_mcp.socket) return;
+      _mcp.socket.send(JSON.stringify({ id: msg.id, type: 'message', channel: _mcp.channel, message: { id: msg.id, result: msg.result } }));
+    }
+
+    function mcpHandleCommandError(msg) {
+      if (!_mcp.connected || !_mcp.socket) return;
+      _mcp.socket.send(JSON.stringify({ id: msg.id, type: 'message', channel: _mcp.channel, message: { id: msg.id, error: msg.error } }));
+    }
+
+    function mcpHandleProgress(msg) {
+      var wrap = document.getElementById('mcp-progress-wrap');
+      var bar = document.getElementById('mcp-progress-bar');
+      var pmsg = document.getElementById('mcp-progress-msg');
+      var ppct = document.getElementById('mcp-progress-pct');
+      if (wrap) wrap.style.display = '';
+      if (bar) bar.style.width = (msg.progress || 0) + '%';
+      if (pmsg) pmsg.textContent = msg.message || 'In progress';
+      if (ppct) ppct.textContent = (msg.progress || 0) + '%';
+      if (msg.status === 'completed') { setTimeout(function() { if (wrap) wrap.style.display = 'none'; }, 4000); }
+
+      // Forward progress to server
+      if (_mcp.connected && _mcp.socket) {
+        _mcp.socket.send(JSON.stringify({ id: msg.commandId, type: 'progress_update', channel: _mcp.channel, message: { id: msg.commandId, type: 'progress_update', data: msg } }));
+      }
+    }
+    // ── End Claude AI / MCP bridge ────────────────────────────────────────────
+
     window.onmessage = (event) => {
       const msg = event.data.pluginMessage;
       console.log('Message from plugin:', msg);
@@ -2924,6 +3122,12 @@
         renderDuplicates(msg);
       } else if (msg.type === 'all-variables-for-diff') {
         renderTokenDiff(msg.variables);
+      } else if (msg.type === 'command-result') {
+        mcpHandleCommandResult(msg);
+      } else if (msg.type === 'command-error') {
+        mcpHandleCommandError(msg);
+      } else if (msg.type === 'command_progress') {
+        mcpHandleProgress(msg);
       } else if (msg.type === 'error') {
         // Cancel any pending zip collection on backend error so we don't hang
         _zipBuffer = null;

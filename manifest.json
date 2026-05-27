@@ -4,8 +4,9 @@
   "api": "1.0.0",
   "main": "dist/code.js",
   "ui": "dist/ui.html",
-"editorType": ["figma"],
+  "editorType": ["figma"],
   "networkAccess": {
-    "allowedDomains": ["https://api.github.com", "https://raw.githubusercontent.com"]
+    "allowedDomains": ["https://api.github.com", "https://raw.githubusercontent.com"],
+    "devAllowedDomains": ["http://localhost:3055", "ws://localhost:3055"]
   }
 }

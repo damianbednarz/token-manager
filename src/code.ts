@@ -2,6 +2,7 @@
 // It has access to the Figma API but not to browser APIs
 
 import { THEMES, STYLES, BASE_THEMES, DEFAULT_BASE, STYLE_RADIUS } from './create-data';
+import { handleCommand, sendProgressUpdate } from './mcp-commands';
 
 figma.showUI(__html__, { width: 460, height: 700 });
 
@@ -1868,5 +1869,18 @@ if (msg.type === 'get-all-variables-for-diff') {
 
   if (msg.type === 'cancel') {
     figma.closePlugin();
+  }
+
+  if (msg.type === 'notify') {
+    figma.notify(msg.message);
+  }
+
+  if (msg.type === 'execute-command') {
+    try {
+      const result = await handleCommand(msg.command, msg.params);
+      figma.ui.postMessage({ type: 'command-result', id: msg.id, result });
+    } catch (error: any) {
+      figma.ui.postMessage({ type: 'command-error', id: msg.id, error: error.message || 'Error executing command' });
+    }
   }
 };
