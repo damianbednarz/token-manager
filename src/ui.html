@@ -2826,8 +2826,11 @@
 
     // ── Claude AI / MCP bridge ────────────────────────────────────────────────
 
+    var _mcpSocketPath = '';
+    try { _mcpSocketPath = localStorage.getItem('mcp_socket_path') || ''; } catch(e) {}
+
     function getMcpSocketPath() {
-      return localStorage.getItem('mcp_socket_path') || '';
+      return _mcpSocketPath;
     }
 
     function getMcpCmd() {
@@ -2836,7 +2839,8 @@
     }
 
     function saveMcpSocketPath(val) {
-      localStorage.setItem('mcp_socket_path', val.trim());
+      _mcpSocketPath = val.trim();
+      try { localStorage.setItem('mcp_socket_path', _mcpSocketPath); } catch(e) {}
       var el = document.getElementById('mcp-howto-cmd');
       if (el) el.textContent = getMcpCmd();
     }
