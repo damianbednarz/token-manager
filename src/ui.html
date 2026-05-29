@@ -2825,6 +2825,21 @@
     // ── End inspect screen ───────────────────────────────────────────────────
 
     // ── Claude AI / MCP bridge ────────────────────────────────────────────────
+
+    function getMcpSocketPath() {
+      return localStorage.getItem('mcp_socket_path') || '';
+    }
+
+    function getMcpCmd() {
+      var p = getMcpSocketPath();
+      return p ? 'bun "' + p + '"' : 'bun "/path/to/claude-talk-to-figma-mcp/dist/socket.js"';
+    }
+
+    function saveMcpSocketPath(val) {
+      localStorage.setItem('mcp_socket_path', val.trim());
+      var el = document.getElementById('mcp-howto-cmd');
+      if (el) el.textContent = getMcpCmd();
+    }
     var _mcp = {
       connected: false,
       socket: null,
@@ -2870,13 +2885,22 @@
             <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;color:var(--text-secondary);line-height:1.6;">
               <strong style="color:var(--text-primary);font-size:12px;">How to use</strong><br>
               1. In a terminal run:<br>
-              <code style="display:block;background:var(--pill-bg);padding:6px 8px;border-radius:4px;margin:6px 0;word-break:break-all;font-size:10px;">bun "C:/Users/antek/Downloads/claude-talk-to-figma-mcp-1.0.0/claude-talk-to-figma-mcp-1.0.0/claude-talk-to-figma-mcp/dist/socket.js"</code>
+              <code id="mcp-howto-cmd" style="display:block;background:var(--pill-bg);padding:6px 8px;border-radius:4px;margin:6px 0;word-break:break-all;font-size:10px;">${getMcpCmd()}</code>
               2. Click <strong>Connect</strong> below<br>
               3. Copy the channel ID that appears<br>
               4. In Claude, use the MCP tool <em>join_channel</em> with that ID
             </div>
 
-            <div style="margin-top:16px;">
+            <div style="margin-top:12px;">
+              <label class="input-label">Path to socket.js</label>
+              <input type="text" class="input-field" id="mcp-socket-path-input"
+                placeholder="/path/to/claude-talk-to-figma-mcp/dist/socket.js"
+                value="${getMcpSocketPath()}"
+                oninput="saveMcpSocketPath(this.value)"
+                style="margin-bottom:0;font-size:11px;font-family:monospace;" />
+            </div>
+
+            <div style="margin-top:12px;">
               <label class="input-label">Server port</label>
               <input type="number" class="input-field" id="mcp-port-input" value="3055" min="1" max="65535" style="margin-bottom:0;" />
             </div>
@@ -2986,7 +3010,7 @@
       el.style.color = 'var(--text-secondary)';
       el.style.cursor = '';
       el.onclick = null;
-      var cmd = 'bun "C:/Users/antek/Downloads/claude-talk-to-figma-mcp-1.0.0/claude-talk-to-figma-mcp-1.0.0/claude-talk-to-figma-mcp/dist/socket.js"';
+      var cmd = getMcpCmd();
       el.innerHTML =
         '<div style="font-weight:600;margin-bottom:8px;color:var(--text-primary);">Server not running</div>' +
         '<div style="font-size:11px;margin-bottom:8px;line-height:1.5;">Run this command in any terminal, then the plugin will connect automatically:</div>' +
