@@ -530,6 +530,107 @@ function rgbToHex(r: number, g: number, b: number): string {
   return '#' + h(r) + h(g) + h(b);
 }
 
+// ── WCAG Contrast Check ─────────────────────────────────────────────────────
+
+interface ContrastResult {
+  nodeId: string;
+  nodeName: string;
+  path: string;
+  textHex: string;
+  bgHex: string;
+  ratio: number;
+  fontSize: number;
+  isBold: boolean;
+  isLargeText: boolean;
+  aaPass: boolean;
+  aaaPass: boolean;
+}
+
+function toLinear(c: number): number {
+  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function relativeLuminance(r: number, g: number, b: number): number {
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+function wcagContrastRatio(l1: number, l2: number): number {
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function getFirstSolidFillColor(node: BaseNode): { r: number; g: number; b: number } | null {
+  if (!('fills' in node)) return null;
+  const fills = (node as any).fills as Paint[];
+  if (!Array.isArray(fills)) return null;
+  for (const fill of fills) {
+    if (fill.type === 'SOLID' && fill.visible !== false) {
+      return { r: (fill as SolidPaint).color.r, g: (fill as SolidPaint).color.g, b: (fill as SolidPaint).color.b };
+    }
+  }
+  return null;
+}
+
+function findBackgroundColor(node: BaseNode): { r: number; g: number; b: number } {
+  let current: BaseNode | null = node.parent;
+  while (current && current.type !== 'PAGE' && current.type !== 'DOCUMENT') {
+    const fill = getFirstSolidFillColor(current);
+    if (fill) return fill;
+    current = current.parent;
+  }
+  return { r: 1, g: 1, b: 1 }; // default white
+}
+
+function computeContrastChecks(nodes: readonly SceneNode[]): ContrastResult[] {
+  const results: ContrastResult[] = [];
+
+  const visit = (node: BaseNode, pathParts: string[]) => {
+    if (node.type === 'TEXT') {
+      const text = node as TextNode;
+      const textFill = getFirstSolidFillColor(text);
+      if (!textFill) return;
+
+      const bgFill = findBackgroundColor(text);
+      const textLum = relativeLuminance(textFill.r, textFill.g, textFill.b);
+      const bgLum = relativeLuminance(bgFill.r, bgFill.g, bgFill.b);
+      const ratio = Math.round(wcagContrastRatio(textLum, bgLum) * 100) / 100;
+
+      const fontSize = typeof text.fontSize === 'number' ? text.fontSize : 16;
+      const fontStyle = typeof text.fontName !== 'symbol'
+        ? (text.fontName as FontName).style.toLowerCase()
+        : '';
+      const isBold = /bold|semibold|black|heavy/.test(fontStyle);
+      const isLargeText = fontSize >= 18 || (fontSize >= 14 && isBold);
+
+      const aaThreshold = isLargeText ? 3.0 : 4.5;
+      const aaaThreshold = isLargeText ? 4.5 : 7.0;
+
+      results.push({
+        nodeId: text.id,
+        nodeName: text.name,
+        path: pathParts.join(' › '),
+        textHex: rgbToHex(textFill.r, textFill.g, textFill.b),
+        bgHex: rgbToHex(bgFill.r, bgFill.g, bgFill.b),
+        ratio,
+        fontSize,
+        isBold,
+        isLargeText,
+        aaPass: ratio >= aaThreshold,
+        aaaPass: ratio >= aaaThreshold,
+      });
+    }
+    if ('children' in node) {
+      for (const child of (node as ChildrenMixin).children) {
+        visit(child, [...pathParts, child.name]);
+      }
+    }
+  };
+
+  for (const node of nodes) visit(node, [node.name]);
+  return results;
+}
+
 function rgbClose(
   a: { r: number; g: number; b: number },
   b: { r: number; g: number; b: number }
@@ -716,12 +817,15 @@ async function runSelectionCheck(): Promise<void> {
     await scanNode(node, themeColorMap, results, [node.name], 0, counter);
   }
 
+  const contrastChecks = computeContrastChecks(selection);
+
   figma.ui.postMessage({
     type: 'selection-check-result',
     nodes: results,
     empty: false,
     themeName: currentThemeName,
-    totalScanned: counter.count
+    totalScanned: counter.count,
+    contrastChecks
   });
 }
 
@@ -1873,6 +1977,10 @@ if (msg.type === 'get-all-variables-for-diff') {
 
   if (msg.type === 'notify') {
     figma.notify(msg.message);
+  }
+
+  if (msg.type === 'resize-plugin') {
+    figma.ui.resize(msg.width, msg.height);
   }
 
   if (msg.type === 'execute-command') {

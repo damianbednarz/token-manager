@@ -7015,6 +7015,82 @@ Input: ${debugJson}`);
         const h = (v) => Math.round(v * 255).toString(16).padStart(2, "0");
         return "#" + h(r) + h(g) + h(b);
       }
+      function toLinear(c) {
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      }
+      function relativeLuminance(r, g, b) {
+        return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+      }
+      function wcagContrastRatio(l1, l2) {
+        const lighter = Math.max(l1, l2);
+        const darker = Math.min(l1, l2);
+        return (lighter + 0.05) / (darker + 0.05);
+      }
+      function getFirstSolidFillColor(node) {
+        if (!("fills" in node))
+          return null;
+        const fills = node.fills;
+        if (!Array.isArray(fills))
+          return null;
+        for (const fill of fills) {
+          if (fill.type === "SOLID" && fill.visible !== false) {
+            return { r: fill.color.r, g: fill.color.g, b: fill.color.b };
+          }
+        }
+        return null;
+      }
+      function findBackgroundColor(node) {
+        let current = node.parent;
+        while (current && current.type !== "PAGE" && current.type !== "DOCUMENT") {
+          const fill = getFirstSolidFillColor(current);
+          if (fill)
+            return fill;
+          current = current.parent;
+        }
+        return { r: 1, g: 1, b: 1 };
+      }
+      function computeContrastChecks(nodes) {
+        const results = [];
+        const visit = (node, pathParts) => {
+          if (node.type === "TEXT") {
+            const text = node;
+            const textFill = getFirstSolidFillColor(text);
+            if (!textFill)
+              return;
+            const bgFill = findBackgroundColor(text);
+            const textLum = relativeLuminance(textFill.r, textFill.g, textFill.b);
+            const bgLum = relativeLuminance(bgFill.r, bgFill.g, bgFill.b);
+            const ratio = Math.round(wcagContrastRatio(textLum, bgLum) * 100) / 100;
+            const fontSize = typeof text.fontSize === "number" ? text.fontSize : 16;
+            const fontStyle = typeof text.fontName !== "symbol" ? text.fontName.style.toLowerCase() : "";
+            const isBold = /bold|semibold|black|heavy/.test(fontStyle);
+            const isLargeText = fontSize >= 18 || fontSize >= 14 && isBold;
+            const aaThreshold = isLargeText ? 3 : 4.5;
+            const aaaThreshold = isLargeText ? 4.5 : 7;
+            results.push({
+              nodeId: text.id,
+              nodeName: text.name,
+              path: pathParts.join(" \u203A "),
+              textHex: rgbToHex(textFill.r, textFill.g, textFill.b),
+              bgHex: rgbToHex(bgFill.r, bgFill.g, bgFill.b),
+              ratio,
+              fontSize,
+              isBold,
+              isLargeText,
+              aaPass: ratio >= aaThreshold,
+              aaaPass: ratio >= aaaThreshold
+            });
+          }
+          if ("children" in node) {
+            for (const child of node.children) {
+              visit(child, [...pathParts, child.name]);
+            }
+          }
+        };
+        for (const node of nodes)
+          visit(node, [node.name]);
+        return results;
+      }
       function rgbClose(a, b) {
         return Math.abs(a.r - b.r) < 0.015 && Math.abs(a.g - b.g) < 0.015 && Math.abs(a.b - b.b) < 0.015;
       }
@@ -7159,12 +7235,14 @@ Input: ${debugJson}`);
           for (const node of selection) {
             yield scanNode(node, themeColorMap, results, [node.name], 0, counter);
           }
+          const contrastChecks = computeContrastChecks(selection);
           figma.ui.postMessage({
             type: "selection-check-result",
             nodes: results,
             empty: false,
             themeName: currentThemeName,
-            totalScanned: counter.count
+            totalScanned: counter.count,
+            contrastChecks
           });
         });
       }
@@ -8318,6 +8396,9 @@ Input: ${debugJson}`);
         }
         if (msg.type === "notify") {
           figma.notify(msg.message);
+        }
+        if (msg.type === "resize-plugin") {
+          figma.ui.resize(msg.width, msg.height);
         }
         if (msg.type === "execute-command") {
           try {

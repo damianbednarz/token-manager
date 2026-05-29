@@ -587,6 +587,14 @@
       transition: transform 0.15s;
     }
     details[open] > summary .chevron { transform: rotate(90deg); }
+    @keyframes mcp-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.55); }
+      70%  { box-shadow: 0 0 0 5px rgba(76, 175, 80, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+    }
+    .mcp-dot-live {
+      animation: mcp-pulse 1.8s ease-out infinite;
+    }
   </style>
 </head>
 <body>
@@ -714,7 +722,7 @@
             <div style="font-size:13px;font-weight:700;color:#e0e8ff;margin-bottom:2px;">Claude AI</div>
             <div style="font-size:11px;color:#8899cc;">Let Claude read &amp; edit this file via MCP</div>
           </div>
-          <span style="background:rgba(100,120,255,0.2);color:#8899ff;font-size:9px;font-weight:700;padding:3px 7px;border-radius:4px;letter-spacing:0.5px;border:1px solid rgba(100,120,255,0.3);flex-shrink:0;">MCP</span>
+          <span style="background:#f59e0b;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:0.5px;flex-shrink:0;">BETA</span>
         </button>
 
         <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Quick Actions</div>
@@ -2823,17 +2831,25 @@
       channel: null,
       pendingRequests: new Map(),
       port: 3055,
+      retryTimer: null,
     };
 
     function showClaudeScreen() {
       document.getElementById('root').innerHTML = `
         <div style="display:flex;flex-direction:column;height:100vh;padding:20px 20px 0 20px;">
-          <div class="screen-header">
+          <div class="screen-header" style="align-items:center;">
             <div class="back-icon" onclick="showDashboard()">←</div>
-            <div>
-              <p class="screen-title">Claude AI <span style="background:#434343;color:#BBBBBB;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:0.5px;vertical-align:middle;">MCP</span></p>
+            <div style="flex:1;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <p class="screen-title" style="margin:0;">Claude AI <span style="background:#f59e0b;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:0.5px;vertical-align:middle;">BETA</span></p>
+                <div style="position:relative;display:inline-flex;align-items:center;" onmouseenter="var t=document.getElementById('mcp-dot-tip');if(t)t.style.opacity='1'" onmouseleave="var t=document.getElementById('mcp-dot-tip');if(t)t.style.opacity='0'">
+                  <div id="mcp-header-dot" class="${_mcp.connected ? 'mcp-dot-live' : ''}" style="width:8px;height:8px;border-radius:50%;background:${_mcp.connected ? '#4caf50' : '#ef4444'};flex-shrink:0;transition:background 0.3s;cursor:default;"></div>
+                  <div id="mcp-dot-tip" style="opacity:0;position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;font-size:10px;font-weight:500;padding:4px 8px;border-radius:4px;white-space:nowrap;pointer-events:none;z-index:100;transition:opacity 0.15s;">${_mcp.connected ? 'MCP server connected' : 'MCP server not connected'}</div>
+                </div>
+              </div>
               <p class="screen-subtitle">Let Claude read and modify this file via the MCP bridge</p>
             </div>
+            <button onclick="mcpMinimize()" title="Minimize — keeps connection alive" style="background:none;border:1px solid var(--border);border-radius:6px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--text-secondary);flex-shrink:0;transition:all 0.2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">−</button>
           </div>
 
           <div style="flex:1;overflow-y:auto;min-height:0;">
@@ -2882,6 +2898,13 @@
       el.style.background = connected ? '#d8ffbb' : (message && message.indexOf('onnect') !== -1 && !connected ? 'var(--accent-bg)' : 'var(--surface)');
       el.style.color = connected ? '#223005' : 'var(--text-secondary)';
       el.style.border = connected ? '1px solid #a0e080' : '1px solid var(--border)';
+      var dot = document.getElementById('mcp-header-dot');
+      if (dot) {
+        dot.style.background = connected ? '#4caf50' : '#ef4444';
+        dot.classList.toggle('mcp-dot-live', connected);
+      }
+      var tip = document.getElementById('mcp-dot-tip');
+      if (tip) tip.textContent = connected ? 'MCP server connected' : 'MCP server not connected';
       var cb = document.getElementById('mcp-connect-btn');
       var db = document.getElementById('mcp-disconnect-btn');
       if (cb) { cb.disabled = connected; cb.style.opacity = connected ? '0.5' : ''; cb.style.cursor = connected ? 'not-allowed' : ''; }
@@ -2892,70 +2915,172 @@
       var portInput = document.getElementById('mcp-port-input');
       var port = portInput ? parseInt(portInput.value, 10) || 3055 : 3055;
       _mcp.port = port;
-
       if (_mcp.connected && _mcp.socket) { mcpSetStatus(true, 'Already connected'); return; }
-
+      mcpClearRetry();
       mcpSetStatus(false, 'Connecting…');
+      mcpAttemptConnect(port);
+    }
 
-      try {
-        _mcp.socket = new WebSocket('ws://localhost:' + port);
+    function mcpAttemptConnect(port) {
+      if (_mcp.socket) { try { _mcp.socket.close(); } catch(e) {} _mcp.socket = null; }
+      var wasConnected = false;
+      var ws;
+      try { ws = new WebSocket('ws://localhost:' + port); } catch(e) { mcpShowWaitingForServer(port); return; }
+      _mcp.socket = ws;
 
-        _mcp.socket.onopen = function() {
-          var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-          var ch = '';
-          for (var i = 0; i < 8; i++) ch += chars.charAt(Math.floor(Math.random() * chars.length));
-          _mcp.channel = ch;
-          _mcp.socket.send(JSON.stringify({ type: 'join', channel: ch.trim() }));
-        };
+      ws.onopen = function() {
+        wasConnected = true;
+        mcpClearRetry();
+        var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        var ch = '';
+        for (var i = 0; i < 8; i++) ch += chars.charAt(Math.floor(Math.random() * chars.length));
+        _mcp.channel = ch;
+        ws.send(JSON.stringify({ type: 'join', channel: ch.trim() }));
+      };
 
-        _mcp.socket.onmessage = function(event) {
-          try {
-            var data = JSON.parse(event.data);
-            if (data.type === 'system' && data.message && data.message.result) {
-              _mcp.connected = true;
-              var ch = data.channel;
-              mcpSetStatus(true, 'Connected on port ' + port + ' · Channel: ' + ch + ' (click to copy)');
-              // Make channel ID copyable
-              var el = document.getElementById('mcp-status');
-              if (el) {
-                el.style.cursor = 'pointer';
-                el.onclick = function() {
-                  var txt = 'Connect to Figma, channel ' + ch;
-                  if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(txt).then(function() {
-                      parent.postMessage({ pluginMessage: { type: 'notify', message: 'Channel ID copied: ' + ch } }, '*');
-                    });
-                  }
-                };
-              }
-            } else if (data.type === 'error') {
-              mcpSetStatus(false, 'Error: ' + data.message);
-              _mcp.socket.close();
+      ws.onmessage = function(event) {
+        try {
+          var data = JSON.parse(event.data);
+          if (data.type === 'system' && data.message && data.message.result) {
+            _mcp.connected = true;
+            var ch = data.channel;
+            mcpSetStatus(true, 'Connected on port ' + port);
+            var el = document.getElementById('mcp-status');
+            if (el) {
+              el.style.cursor = '';
+              el.onclick = null;
+              el.innerHTML =
+                '<div style="margin-bottom:6px;">Connected on port ' + port + '</div>' +
+                '<div style="display:flex;align-items:center;gap:8px;">' +
+                  '<code style="flex:1;font-size:13px;font-weight:700;letter-spacing:0.5px;background:rgba(0,0,0,0.15);padding:4px 8px;border-radius:4px;">' + ch + '</code>' +
+                  '<button id="mcp-copy-btn" onclick="mcpCopyChannel(\'' + ch + '\')" style="background:none;border:1px solid currentColor;border-radius:4px;cursor:pointer;padding:3px 10px;font-size:11px;color:inherit;opacity:0.8;white-space:nowrap;transition:opacity 0.2s;">Copy ID</button>' +
+                '</div>';
             }
-            mcpHandleSocketMessage(data);
-          } catch(e) { console.error('MCP parse error', e); }
-        };
+          } else if (data.type === 'error') {
+            mcpSetStatus(false, 'Error: ' + data.message);
+            ws.close();
+          }
+          mcpHandleSocketMessage(data);
+        } catch(e) { console.error('MCP parse error', e); }
+      };
 
-        _mcp.socket.onclose = function() {
-          _mcp.connected = false;
-          _mcp.socket = null;
-          mcpSetStatus(false, 'Disconnected — try reconnecting');
-        };
+      ws.onerror = function() { /* onclose handles everything */ };
 
-        _mcp.socket.onerror = function() {
-          mcpSetStatus(false, 'Connection error — is the socket server running?');
+      ws.onclose = function() {
+        _mcp.socket = null;
+        if (wasConnected) {
           _mcp.connected = false;
-          _mcp.socket = null;
-        };
-      } catch(e) {
-        mcpSetStatus(false, 'Error: ' + (e.message || 'unknown'));
-      }
+          mcpSetStatus(false, 'Disconnected — reconnecting…');
+          _mcp.retryTimer = setTimeout(function() { mcpAttemptConnect(port); }, 2000);
+        } else {
+          mcpShowWaitingForServer(port);
+        }
+      };
+    }
+
+    function mcpShowWaitingForServer(port) {
+      var el = document.getElementById('mcp-status');
+      if (!el) return;
+      el.style.background = 'var(--surface)';
+      el.style.border = '1px solid var(--border)';
+      el.style.color = 'var(--text-secondary)';
+      el.style.cursor = '';
+      el.onclick = null;
+      var cmd = 'bun "C:/Users/antek/Downloads/claude-talk-to-figma-mcp-1.0.0/claude-talk-to-figma-mcp-1.0.0/claude-talk-to-figma-mcp/dist/socket.js"';
+      el.innerHTML =
+        '<div style="font-weight:600;margin-bottom:8px;color:var(--text-primary);">Server not running</div>' +
+        '<div style="font-size:11px;margin-bottom:8px;line-height:1.5;">Run this command in any terminal, then the plugin will connect automatically:</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;background:var(--pill-bg);border-radius:6px;padding:6px 8px;margin-bottom:10px;">' +
+          '<code id="mcp-cmd-text" style="flex:1;font-size:10px;word-break:break-all;color:var(--text-primary);line-height:1.4;">' + cmd + '</code>' +
+          '<button id="mcp-cmd-copy-btn" onclick="mcpCopyCmd()" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;padding:2px 8px;font-size:10px;color:var(--text-secondary);transition:all 0.15s;" onmouseover="this.style.borderColor=\'var(--accent)\';this.style.color=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.color=\'var(--text-secondary)\'">Copy</button>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">' +
+          '<span id="mcp-retry-dots" style="letter-spacing:2px;">···</span>' +
+          '<span>Waiting for server to start…</span>' +
+        '</div>';
+      mcpAnimateDots();
+      _mcp.retryTimer = setTimeout(function() { mcpAttemptConnect(port); }, 2000);
+    }
+
+    function mcpAnimateDots() {
+      var i = 0;
+      var frames = ['·  ', '·· ', '···'];
+      var interval = setInterval(function() {
+        var el = document.getElementById('mcp-retry-dots');
+        if (!el) { clearInterval(interval); return; }
+        el.textContent = frames[i % frames.length];
+        i++;
+      }, 500);
+    }
+
+    function mcpCopyCmd() {
+      var el = document.getElementById('mcp-cmd-text');
+      var btn = document.getElementById('mcp-cmd-copy-btn');
+      var txt = el ? el.textContent : '';
+      var done = function() {
+        if (btn) { btn.textContent = '✓ Copied!'; btn.style.borderColor = '#4caf50'; btn.style.color = '#4caf50'; }
+        setTimeout(function() { if (btn) { btn.textContent = 'Copy'; btn.style.borderColor = ''; btn.style.color = ''; } }, 2000);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(done).catch(function() { mcpCopyFallback(txt); done(); });
+      } else { mcpCopyFallback(txt); done(); }
+    }
+
+    function mcpClearRetry() {
+      if (_mcp.retryTimer) { clearTimeout(_mcp.retryTimer); _mcp.retryTimer = null; }
     }
 
     function mcpDisconnect() {
+      mcpClearRetry();
       if (_mcp.socket) { _mcp.socket.close(); _mcp.socket = null; }
       _mcp.connected = false;
       mcpSetStatus(false, 'Disconnected');
+    }
+
+    function mcpCopyChannel(ch) {
+      var txt = 'Connect to Figma, channel ' + ch;
+      var btn = document.getElementById('mcp-copy-btn');
+      var copy = function() {
+        if (btn) { btn.textContent = '✓ Copied!'; btn.style.borderColor = '#4caf50'; btn.style.color = '#4caf50'; }
+        parent.postMessage({ pluginMessage: { type: 'notify', message: 'Channel ID copied: ' + ch } }, '*');
+        setTimeout(function() { if (btn) { btn.textContent = 'Copy ID'; btn.style.borderColor = ''; btn.style.color = ''; } }, 2000);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(copy).catch(function() { mcpCopyFallback(txt); copy(); });
+      } else {
+        mcpCopyFallback(txt); copy();
+      }
+    }
+
+    function mcpCopyFallback(txt) {
+      var ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      try { document.execCommand('copy'); } catch(e) {}
+      document.body.removeChild(ta);
+    }
+
+    function mcpMinimize() {
+      document.getElementById('root').innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;height:100vh;padding:0 16px;box-sizing:border-box;">
+          <div style="position:relative;display:inline-flex;align-items:center;" onmouseenter="var t=document.getElementById('mini-dot-tip');if(t)t.style.opacity='1'" onmouseleave="var t=document.getElementById('mini-dot-tip');if(t)t.style.opacity='0'">
+            <div id="mini-dot" class="${_mcp.connected ? 'mcp-dot-live' : ''}" style="width:8px;height:8px;border-radius:50%;background:${_mcp.connected ? '#4caf50' : '#ef4444'};flex-shrink:0;cursor:default;"></div>
+            <div id="mini-dot-tip" style="opacity:0;position:absolute;left:14px;top:50%;transform:translateY(-50%);background:#1a1a1a;color:#fff;font-size:10px;font-weight:500;padding:4px 8px;border-radius:4px;white-space:nowrap;pointer-events:none;z-index:100;transition:opacity 0.15s;">${_mcp.connected ? 'MCP server connected' : 'MCP server not connected'}</div>
+          </div>
+          <span style="font-size:12px;font-weight:600;color:var(--text-primary);flex-shrink:0;">Claude MCP</span>
+          <span id="mini-ch" style="font-size:11px;font-family:monospace;color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_mcp.channel || ''}</span>
+          ${_mcp.connected && _mcp.channel ? `<button onclick="mcpCopyChannel('${_mcp.channel}')" style="background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;padding:2px 8px;font-size:10px;color:var(--text-secondary);transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-secondary)'">Copy</button>` : ''}
+          <button onclick="mcpExpand()" title="Expand" style="background:none;border:1px solid var(--border);border-radius:6px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:var(--text-secondary);flex-shrink:0;transition:border-color 0.15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">+</button>
+        </div>
+      `;
+      parent.postMessage({ pluginMessage: { type: 'resize-plugin', width: 460, height: 48 } }, '*');
+    }
+
+    function mcpExpand() {
+      parent.postMessage({ pluginMessage: { type: 'resize-plugin', width: 460, height: 700 } }, '*');
+      showClaudeScreen();
     }
 
     function mcpHandleSocketMessage(payload) {
